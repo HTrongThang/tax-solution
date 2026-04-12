@@ -1,0 +1,112 @@
+<main class=" max-w-[95%] mx-auto w-full space-y-[2vh] animate-in fade-in duration-300">
+
+    <div class="border-b-2 border-slate-200 pb-[1.5vh]">
+        <h1 class="font-bold text-slate-800 tracking-tight"
+            style="font-size: clamp(1.25rem, 2vw, 2.25rem);">
+            Quản trị danh sách MST
+        </h1>
+        <p class="text-slate-500 mt-1 font-medium"
+           style="font-size: clamp(0.75rem, 1vw, 1rem);">
+            Lưu trữ Mã số thuế để khởi tạo tiến trình khai thác tự động.
+        </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-12 gap-[3vw]">
+
+        <div class="md:col-span-4 space-y-[2vh]">
+            <div class="bg-white border-2 border-slate-200 rounded-2xl p-[1vw] shadow-md">
+                <h3 class="font-black text-slate-700 mb-[1vh] uppercase tracking-widest"
+                    style="font-size: clamp(0.75rem, 1vw, 1.125rem);">
+                    Thêm mới
+                </h3>
+
+                <div class="space-y-[3vh]">
+                    <div class="group">
+                        <label class="flex items-center gap-2 font-bold text-slate-600 mb-2 ml-1 transition-colors group-focus-within:text-blue-600"
+                               style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
+                            <span class="text-lg">🏢</span> Mã số thuế doanh nghiệp
+                        </label>
+                        <div class="relative">
+                            <input type="text" id="mst_input" maxlength="14"
+                                   class="w-full bg-slate-50 border-2 border-slate-200 p-[0.7vw] pl-[2.5vw] rounded-2xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold tracking-[0.1em] shadow-sm"
+                                   style="font-size: clamp(1rem, 1.4vw, 1.4rem);"
+                                   placeholder="03xxxxxxxx"
+                                   onkeypress="if(event.key === 'Enter') document.getElementById('pass_input').focus()">
+                            <span class="absolute left-[1vw] top-1/2 -translate-y-1/2 opacity-30 text-[1.2vw]">🆔</span>
+                        </div>
+                    </div>
+                    <div class="group">
+                        <label class="flex items-center gap-2 font-bold text-slate-600 mb-2 ml-1 transition-colors group-focus-within:text-blue-600"
+                               style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
+                            <span class="text-lg">🏢</span> Tên đơn vị / Công ty
+                        </label>
+                        <div class="relative">
+                            <input type="text" id="company_input"
+                                   class="w-full bg-slate-50 border-2 border-slate-200 p-[0.7vw] pl-[2.5vw] rounded-2xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-semibold italic shadow-sm"
+                                   style="font-size: clamp(1rem, 1.4vw, 1.4rem);"
+                                   placeholder="Công ty TNHH..."
+                                   onkeypress="if(event.key === 'Enter') document.getElementById('pass_input').focus()">
+                            <span class="absolute left-[1.2vw] top-1/2 -translate-y-1/2 opacity-30 text-[1.2vw]">🏛️</span>
+                        </div>
+                    </div>
+                    <div class="group">
+                        <label class="flex items-center gap-2 font-bold text-slate-600 mb-2 ml-1 transition-colors group-focus-within:text-blue-600"
+                               style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
+                            <span class="text-lg">🔒</span> Mật khẩu hệ thống
+                        </label>
+                        <div class="relative">
+                            <input type="password" id="pass_input"
+                                   class="w-full bg-slate-50 border-2 border-slate-200 p-[0.7vw] pl-[2.5vw] rounded-2xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all tracking-[0.3em]"
+                                   style="font-size: clamp(1rem, 1.4vw, 1.4rem);"
+                                   placeholder="••••••••"
+                                   onkeypress="if(event.key === 'Enter') addToTempList()">
+                            <span class="absolute left-[1vw] top-1/2 -translate-y-1/2 opacity-30 text-[1.2vw]">🔑</span>
+                        </div>
+                    </div>
+
+                    <button onclick="addToTempList()"
+                            class="w-full py-[2vh] bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black transition-all active:scale-[0.98] shadow-xl shadow-blue-500/20 hover:shadow-blue-500/40 tracking-widest flex items-center justify-center gap-3 group"
+                            style="font-size: clamp(0.8rem, 1.1vw, 1.1rem);">
+                        <span>NẠP VÀO HÀNG CHỜ</span>
+                        <span class="transition-transform group-hover:translate-x-1">🚀</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="p-[1.5vw] bg-blue-50 border-2 border-blue-100 rounded-2xl">
+                <p class="text-blue-600 leading-relaxed font-bold"
+                   style="font-size: clamp(0.75rem, 0.9vw, 1rem);">
+                    💡 Mẹo: Nhấn Enter để thêm nhanh tài khoản.
+                </p>
+            </div>
+        </div>
+
+        <div class="md:col-span-8 space-y-6">
+            <div class="bg-white border-2 border-slate-200 rounded-2xl shadow-md overflow-hidden flex flex-col"
+                 style="min-height: 60vh;">
+
+                <div class="p-[1.5vw] bg-slate-50 border-b-2 border-slate-200 flex justify-between items-center">
+                    <span class="font-black text-slate-600 uppercase tracking-widest"
+                          style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
+                        Danh sách các tài khoản MST
+                    </span>
+                    <button id="btnSaveAll" onclick="submitAllToCSharp()"
+                            class="hidden px-[2vw] py-[1vh] bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black transition-all shadow-md tracking-widest uppercase"
+                            style="font-size: clamp(0.6rem, 0.8vw, 0.9rem);">
+                        LƯU <span id="count_badge" class="text-blue-200">0</span> TÀI KHOẢN ✅
+                    </button>
+                </div>
+
+                <div id="temp_tax_list" class="divide-y-2 divide-slate-100 overflow-y-auto">
+                    <div class="flex flex-col items-center justify-center py-[10vh] text-slate-300">
+                        <p class="font-black uppercase tracking-[0.3em]"
+                           style="font-size: clamp(0.75rem, 1vw, 1.2rem);">
+                            Danh sách trống
+                        </p>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
