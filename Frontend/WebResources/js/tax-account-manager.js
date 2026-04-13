@@ -1,13 +1,83 @@
 /**
- * TaxSolution v1.0 - Account Manager Logic
+ * TaxSolution v1.1 - Account Manager Logic
  * Author: Hà Trọng Thắng
- * Mô tả: Quản lý danh sách MST tạm thời và gửi sang C#
  */
+var tempStorage = [];
 
-// SỬA LỖI: Dùng var và kiểm tra để không bị báo "already declared" khi nạp lại trang
-var tempStorage = tempStorage || [];
+window.loadInitialData = function (jsonString) {
+    try {
+        // Parse dữ liệu
+        const data = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
 
-// 1. Hàm thêm tài khoản vào hàng chờ
+        if (Array.isArray(data)) {
+            tempStorage = data; // Lưu vào mảng dùng chung
+
+            if (typeof window.renderCompanyDropdown === 'function') {
+                window.renderCompanyDropdown();
+            }
+
+
+            // Kiểm tra xem hàm vẽ đã "lộ diện" chưa
+            if (typeof window.renderAccountList === 'function') {
+                window.renderAccountList();
+                console.log("Hệ thống: Đã nhận dữ liệu và vẽ giao diện thành công!");
+            } else {
+                // Nếu chạy vào đây nghĩa là Thắng chưa dùng 'window.renderAccountList' 
+                // ở file component rồi!
+                console.error("Lỗi: Không tìm thấy hàm window.renderAccountList trên giao diện.");
+            }
+        }
+    } catch (e) {
+        console.error("Lỗi xử lý JSON:", e);
+    }
+};
+/**
+ * Hàm vẽ danh sách MST lên giao diện
+ * Được gắn vào 'window' để các file script khác (như manager) có thể gọi
+ */
+window.renderAccountList = function () {
+    const container = document.getElementById('temp_tax_list');
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    if (!window.tempStorage || window.tempStorage.length === 0) {
+        container.innerHTML = `<tr><td colspan="5" class="py-10 text-center text-slate-300 text-xs italic">Chưa có dữ liệu hàng chờ...</td></tr>`;
+        return;
+    }
+
+    [...window.tempStorage].reverse().forEach((item, index) => {
+        const realIndex = window.tempStorage.length - 1 - index;
+        const dateAdded = item.date || new Date().toLocaleDateString('vi-VN');
+        const rowHtml = `
+<tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50/50 transition-colors">
+    <td class="py-1.5 px-3 text-[10px] text-slate-500 text-center font-mono">${realIndex + 1}</td>
+    
+    <td class="py-1.5 px-2 text-xs text-black font-medium font-mono">${item.mst}</td>
+    
+    <td class="py-1.5 px-2 text-xs text-slate-800">${item.company || '---'}</td>
+    
+    <td class="py-1.5 px-2 text-[10px] text-slate-500 font-mono">${dateAdded}</td>
+    
+    <td class="py-1.5 px-3 text-right">
+        <button onclick="window.deleteAccount('${item.mst}')" 
+                class="text-rose-500 hover:text-rose-700 transition-all p-0.5"
+                title="Xóa">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" 
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+        </button>
+    </td>
+</tr>`;
+        container.insertAdjacentHTML('beforeend', rowHtml);
+    });
+
+    const badge = document.getElementById('count_badge');
+    if (badge) badge.innerText = window.tempStorage.length;
+};
+
+// --- 2. HÀM THÊM MỚI VÀ LƯU ---
 window.addToTempList = function () {
     const mstEl = document.getElementById('mst_input');
     const companyEl = document.getElementById('company_input');
@@ -16,118 +86,66 @@ window.addToTempList = function () {
     if (!mstEl || !companyEl || !passEl) return;
 
     const mst = mstEl.value.trim();
-    const company = companyEl.value.trim();
+    const company = companyEl.value.trim() || "Doanh nghiệp chưa đặt tên";
     const pass = passEl.value.trim();
 
-    // Kiểm tra đầu vào
     if (!mst || !pass) {
-        if (typeof window.showAlert === "function") {
-            window.showAlert("Thiếu thông tin", "Thắng ơi, nhập đủ Mã số thuế và Mật khẩu nhé!", "error");
-        } else {
-            alert("Vui lòng nhập đầy đủ MST và Mật khẩu!");
-        }
+        window.showAlert("Lỗi", "Bạn ơi, nhập đủ Mã số thuế và Mật khẩu nhé!", "error");
         mstEl.focus();
         return;
     }
 
-    // Kiểm tra trùng MST trong danh sách hiện tại
     if (tempStorage.some(item => item.mst === mst)) {
-        if (typeof window.showAlert === "function") {
-            window.showAlert("Trùng lặp", "Mã số thuế này đã có trong danh sách chờ!", "error");
-        }
+        window.showAlert("Trùng lặp", "Mã số thuế này đã tồn tại trong hệ thống!", "error");
         return;
     }
 
-    // Thêm vào mảng (Sử dụng var tempStorage ở trên)
-    tempStorage.push({
-        mst: mst,
-        company: company || "Doanh nghiệp chưa đặt tên",
-        pass: pass
-    });
-
-    // Reset Form và focus lại ô đầu tiên để nhập tiếp cho nhanh
-    mstEl.value = "";
-    companyEl.value = "";
-    passEl.value = "";
-    mstEl.focus();
-
-    window.renderAccountList();
-};
-
-// 2. Hàm hiển thị danh sách ra giao diện
-window.renderAccountList = function () {
-    const container = document.getElementById('temp_tax_list');
-    const btnSave = document.getElementById('btnSaveAll');
-    const countBadge = document.getElementById('count_badge');
-
-    if (!container) return;
-
-    if (tempStorage.length === 0) {
-        if (btnSave) btnSave.classList.add('hidden');
-        container.innerHTML = `
-            <div class="flex flex-col items-center justify-center py-[10vh] text-slate-300">
-                <p class="font-black uppercase tracking-[0.3em]" style="font-size: clamp(0.75rem, 1vw, 1.2rem);">Danh sách trống</p>
-            </div>`;
-        return;
-    }
-
-    if (btnSave) btnSave.classList.remove('hidden');
-    if (countBadge) countBadge.innerText = tempStorage.length;
-
-    // Render danh sách (Đảo ngược để cái mới nhất lên đầu)
-    container.innerHTML = tempStorage.slice().reverse().map((item, index) => {
-        // Tính lại index đúng sau khi reverse
-        const realIndex = tempStorage.length - 1 - index;
-        return `
-            <div class="flex items-center justify-between p-5 bg-white hover:bg-blue-50/50 transition-all border-b border-slate-100 animate-in slide-in-from-right-5">
-                <div class="flex items-center gap-5">
-                    <span class="text-xs font-black text-slate-300">${realIndex + 1}</span>
-                    <div>
-                        <p class="font-black text-slate-800 tracking-wider" style="font-size: 1.1rem;">${item.mst}</p>
-                        <p class="text-xs font-bold text-blue-600 uppercase tracking-tighter">${item.company}</p>
-                    </div>
-                </div>
-                <button onclick="window.removeAccount(${realIndex})" class="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-300 hover:bg-red-50 hover:text-red-500 transition-all">
-                    ✕
-                </button>
-            </div>
-        `;
-    }).join('');
-};
-
-// 3. Hàm xóa một tài khoản khỏi hàng chờ
-window.removeAccount = function (index) {
-    tempStorage.splice(index, 1);
-    window.renderAccountList();
-};
-
-// 4. Hàm gửi toàn bộ dữ liệu sang WinForms (C#)
-window.submitAllToCSharp = function () {
-    if (tempStorage.length === 0) return;
+    const newAccount = { mst, company, pass };
 
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({
-            action: "SAVE_TAX_ACCOUNTS",
-            data: tempStorage
+            action: "ADD_AND_SAVE_MST",
+            data: newAccount
         });
 
-        if (typeof window.showAlert === "function") {
-            window.showAlert("Thành công", `Đã gửi ${tempStorage.length} tài khoản sang hệ thống lưu trữ!`, "success");
-        } else {
-            alert("Lưu thành công!");
-        }
-
-        // Xóa sạch hàng chờ sau khi đã gửi sang C# thành công
-        tempStorage = [];
+        tempStorage.push(newAccount);
         window.renderAccountList();
-    } else {
-        if (typeof window.showAlert === "function") {
-            window.showAlert("Lỗi kết nối", "Không tìm thấy môi trường WebView2!", "error");
-        }
+
+        // Clear form
+        mstEl.value = ""; companyEl.value = ""; passEl.value = "";
+        mstEl.focus();
     }
 };
 
-// Tự động render lần đầu nếu có dữ liệu cũ
-document.addEventListener('DOMContentLoaded', () => {
-    window.renderAccountList();
-});
+/**
+ * HÀM XÓA TÀI KHOẢN
+ * Áp dụng logic tìm theo MST để đảm bảo xóa đúng dữ liệu
+ */
+window.deleteAccount = function (mst) {
+    const storage = window.tempStorage || [];
+    const realIndex = storage.findIndex(item => String(item.mst) === String(mst));
+
+    if (realIndex === -1) return;
+
+    // Thay confirm bằng showConfirm xịn xò
+    window.showConfirm(
+        "Xác nhận xóa",
+        `Bạn có chắc muốn loại bỏ MST ${mst} khỏi danh sách không?`,
+        function () {
+            // Tất cả logic xóa đặt vào trong callback này
+            storage.splice(realIndex, 1);
+
+            if (window.chrome && window.chrome.webview) {
+                window.chrome.webview.postMessage({
+                    action: "DELETE_AND_SAVE_MST",
+                    mst: String(mst)
+                });
+            }
+
+            window.renderAccountList();
+
+            // Hiện thêm một cái alert nhỏ báo thành công cho chuyên nghiệp
+            window.showAlert("Đã xóa", `Đã loại bỏ MST ${mst} thành công.`, "success");
+        }
+    );
+};

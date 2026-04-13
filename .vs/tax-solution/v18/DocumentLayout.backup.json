@@ -1,0 +1,105 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\tax-solution\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\components\\crawler_table.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\components\\crawler_table.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\js\\crawlertable.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\js\\crawlertable.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\js\\tax-account-manager.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\js\\tax-account-manager.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\js\\sidebar.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\js\\sidebar.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\dashboard.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\dashboard.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 4,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "sidebar.js",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\js\\sidebar.js",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\js\\sidebar.js",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\js\\sidebar.js",
+              "RelativeToolTip": "Frontend\\WebResources\\js\\sidebar.js",
+              "ViewState": "AgIAABgAAAAAAAAAAAAAACsAAABEAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
+              "WhenOpened": "2026-04-13T11:04:09.526Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "tax-account-manager.js",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\js\\tax-account-manager.js",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\js\\tax-account-manager.js",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\js\\tax-account-manager.js",
+              "RelativeToolTip": "Frontend\\WebResources\\js\\tax-account-manager.js",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAA6AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
+              "WhenOpened": "2026-04-13T10:54:33.981Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "dashboard.html",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\dashboard.html",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\dashboard.html",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\dashboard.html",
+              "RelativeToolTip": "Frontend\\WebResources\\User\\dashboard.html",
+              "ViewState": "AgIAAB4AAAAAAAAAAAAAAEEAAAAhAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-04-13T10:50:06.206Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "crawlerTable.js",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\js\\crawlerTable.js",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\js\\crawlerTable.js",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\js\\crawlerTable.js",
+              "RelativeToolTip": "Frontend\\WebResources\\js\\crawlerTable.js",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABgAAAASAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
+              "WhenOpened": "2026-04-13T10:49:15.109Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "crawler_table.html",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\crawler_table.html",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\components\\crawler_table.html",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\crawler_table.html",
+              "RelativeToolTip": "Frontend\\WebResources\\User\\components\\crawler_table.html",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAAZAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-04-13T10:32:55.248Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

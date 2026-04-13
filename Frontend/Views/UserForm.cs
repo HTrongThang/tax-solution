@@ -1,4 +1,5 @@
-﻿using Microsoft.Web.WebView2.Core;
+﻿using Frontend.Models;
+using Microsoft.Web.WebView2.Core;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -8,7 +9,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Frontend.Models;
+using System.Xml;
+using Newtonsoft.Json;
+using System.IO;
+using Formatting = Newtonsoft.Json.Formatting;
 namespace Frontend.Views
 {
     public partial class UserForm : Form
@@ -82,17 +86,123 @@ namespace Frontend.Views
 
             await webViewUser.CoreWebView2.ExecuteScriptAsync(jsCode);
         }
-        private void CoreWebView2_WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        private async void CoreWebView2_WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
-            // Lấy tin nhắn từ JavaScript gửi về
-            string message = e.TryGetWebMessageAsString();
+            // 1. Lấy dữ liệu dưới dạng JSON
+            string jsonRaw = e.WebMessageAsJson;
 
-            if (message == "LOGOUT")
+            // 2. Parse thành đối tượng dynamic để truy cập nhanh các thuộc tính
+            dynamic packet = JsonConvert.DeserializeObject(jsonRaw);
+            if (packet == null) return;
+
+            string action = packet.action;
+            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
+
+            switch (action)
             {
-                this.Invoke(new Action(() => {
-                    this.Close();
+                case "LOGOUT":
+                    this.Invoke(new Action(() => {
+                        this.Close();
+                    }));
+                    break;
 
-                }));
+                case "ADD_AND_SAVE_MST":
+                    try
+                    {
+                        // 1. Kiểm tra dữ liệu đầu vào (phòng hờ lỗi từ JS)
+                        if (packet.data == null || packet.data.mst == null)
+                        {
+                            MessageBox.Show("Dữ liệu không hợp lệ!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            break;
+                        }
+
+                        List<dynamic> listAdd = new List<dynamic>();
+                        if (File.Exists(filePath))
+                        {
+                            string content = File.ReadAllText(filePath);
+                            listAdd = JsonConvert.DeserializeObject<List<dynamic>>(content) ?? new List<dynamic>();
+                        }
+
+                        // 2. Thêm dữ liệu mới
+                        listAdd.Add(packet.data);
+
+                        // 3. Thực hiện ghi file
+                        string jsonOutput = JsonConvert.SerializeObject(listAdd, Newtonsoft.Json.Formatting.Indented);
+                        File.WriteAllText(filePath, jsonOutput);
+
+                        // 4. CHỈ THÔNG BÁO THÀNH CÔNG KHI MỌI THỨ XONG XUÔI
+                           MessageBox.Show(
+                             "Hệ thống đã ghi dữ liệu thành công!",
+                             "TaxSolution - Thông báo hệ thống",
+                             MessageBoxButtons.OK,
+                             MessageBoxIcon.Information
+                         );
+                    }
+                    catch (Exception ex)
+                    {
+                        // 1. Ghi log lỗi ra cửa sổ Output của Visual Studio để Thắng dễ debug
+                        System.Diagnostics.Debug.WriteLine("Lỗi lưu file: " + ex.Message);
+
+                        // 2. Kiểm tra nếu WebView2 sẵn sàng thì hiện Modal đẹp của Thắng
+                        if (webViewUser != null && webViewUser.CoreWebView2 != null)
+                        {
+                            string errorMsg = ex.Message.Replace("'", "").Replace("\n", " ");
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                                $"window.showAlert('Lỗi hệ thống', 'Không thể ghi file JSON: {errorMsg}', 'error')"
+                            );
+                        }
+                        else
+                        {
+                            // 3. Nếu WebView2 chưa sẵn sàng (đang bị Null) thì dùng MessageBox chữa cháy
+                            MessageBox.Show(
+                                $"Lỗi nghiêm trọng: {ex.Message}",
+                                "TaxSolution - Lỗi ghi file",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Error
+                            );
+                        }
+                    }
+                    break;
+
+                case "DELETE_AND_SAVE_MST":
+                    if (File.Exists(filePath))
+                    {
+                        try
+                        {
+                            string content = File.ReadAllText(filePath);
+                            var listDelete = JsonConvert.DeserializeObject<List<dynamic>>(content) ?? new List<dynamic>();
+
+                            string mstToDelete = packet.mst;
+                            // Dùng ToList() để thực hiện lọc
+                            var filteredList = listDelete.Where(x => (string)x.mst != mstToDelete).ToList();
+
+                            File.WriteAllText(filePath, JsonConvert.SerializeObject(filteredList, Formatting.Indented));
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine("Lỗi xóa: " + ex.Message);
+                        }
+                    }
+                    break;
+                case "GET_SETTINGS_DATA":
+                    await SendJsonDataToWeb(filePath);
+                    break;
+            }
+        }
+        private async Task SendJsonDataToWeb(string filePath)
+        {
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    string jsonData = File.ReadAllText(filePath);
+                    string safeJson = JsonConvert.ToString(jsonData);
+                    await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.loadInitialData({safeJson})");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Lỗi bắn dữ liệu: " + ex.Message);
             }
         }
         private void UserForm_FormClosed(object sender, FormClosedEventArgs e)

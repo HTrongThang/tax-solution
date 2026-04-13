@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "D:\\2.Company\\TaxSolution\\Frontend\\Frontend.csproj": {}
+    "D:\\tax-solution\\Frontend\\Frontend.csproj": {}
   },
   "projects": {
-    "D:\\2.Company\\TaxSolution\\Frontend\\Frontend.csproj": {
+    "D:\\tax-solution\\Frontend\\Frontend.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\2.Company\\TaxSolution\\Frontend\\Frontend.csproj",
+        "projectUniqueName": "D:\\tax-solution\\Frontend\\Frontend.csproj",
         "projectName": "Frontend",
-        "projectPath": "D:\\2.Company\\TaxSolution\\Frontend\\Frontend.csproj",
-        "packagesPath": "C:\\Users\\Admin\\.nuget\\packages\\",
-        "outputPath": "D:\\2.Company\\TaxSolution\\Frontend\\obj\\",
+        "projectPath": "D:\\tax-solution\\Frontend\\Frontend.csproj",
+        "packagesPath": "C:\\Users\\Dell\\.nuget\\packages\\",
+        "outputPath": "D:\\tax-solution\\Frontend\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\Admin\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\Dell\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
@@ -53,6 +53,10 @@
             "Microsoft.Web.WebView2": {
               "target": "Package",
               "version": "[1.0.3856.49, )"
+            },
+            "Newtonsoft.Json": {
+              "target": "Package",
+              "version": "[13.0.4, )"
             }
           },
           "imports": [

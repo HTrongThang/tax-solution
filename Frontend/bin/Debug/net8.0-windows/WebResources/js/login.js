@@ -1,6 +1,7 @@
 // js/login.js
 
 function guiLenhDangNhap() {
+    debugger;
     // Thêm .trim() để tránh trường hợp Thắng chỉ gõ dấu cách
     const userVal = document.getElementById('user').value.trim();
     const passVal = document.getElementById('pass').value.trim();
@@ -41,3 +42,4 @@ document.addEventListener('keypress', function (e) {
         guiLenhDangNhap();
     }
 });
+

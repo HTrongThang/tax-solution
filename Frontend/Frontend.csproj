@@ -14,6 +14,7 @@
     <None Remove="WebResources\css\style.css" />
     <None Remove="WebResources\js\admin.js" />
     <None Remove="WebResources\js\common.js" />
+    <None Remove="WebResources\js\crawlerTable.js" />
     <None Remove="WebResources\js\login.js" />
     <None Remove="WebResources\js\sidebar.js" />
     <None Remove="WebResources\js\tailwind.js" />
@@ -39,6 +40,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="WebResources\js\common.js">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="WebResources\js\crawlerTable.js">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="WebResources\js\login.js">
@@ -81,6 +85,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3856.49" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
   <ItemGroup>
