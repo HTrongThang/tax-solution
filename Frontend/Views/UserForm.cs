@@ -11,17 +11,23 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
 using Newtonsoft.Json;
+using Frontend.Services;
 using System.IO;
 using Formatting = Newtonsoft.Json.Formatting;
 namespace Frontend.Views
 {
     public partial class UserForm : Form
     {
+        private readonly TaxService _taxService = new TaxService();
+        // Thêm dòng này để lưu dữ liệu công ty vào RAM
+        private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
+        private readonly string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
         public UserForm()
         {
             InitializeComponent();
             this.Load += UserForm_Load;
             this.FormClosed += UserForm_FormClosed;
+            LoadCompaniesToRAM();
         }
         private async void UserForm_Load(object sender, EventArgs e)
         {
@@ -52,6 +58,40 @@ namespace Frontend.Views
                 if (args.IsSuccess)
                 {
                     await SyncHeaderWithSession();
+                    try
+                    {
+                        string response = await _taxService.Init();
+
+                        if (!string.IsNullOrEmpty(response))
+                        {
+                            // Parse JSON trả về từ Go
+                            dynamic result = JsonConvert.DeserializeObject(response);
+                            string status = result?.status;
+                            string message = result?.message;
+
+                            if (status == "success")
+                            {
+                                // Nếu thành công, log ra để debug
+                                System.Diagnostics.Debug.WriteLine("Khởi tạo thành công: " + message);
+                            }
+                            else
+                            {
+                                // Nếu Go trả về lỗi (status: "error")
+                                await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                                    $"window.showAlert('Lỗi hệ thống', '{message}', 'error')"
+                                );
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Lỗi này xảy ra khi Backend chưa bật hoặc sập (Connection Refused)
+                        System.Diagnostics.Debug.WriteLine("Lỗi kết nối Backend: " + ex.Message);
+
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                            $"window.showAlert('Lỗi kết nối', 'Không thể kết nối tới Service (localhost:8080). Vui lòng kiểm tra Backend!', 'error')"
+                        );
+                    }
                     this.Opacity = 1; // Chỉ hiện khi đã nạp xong và đồng bộ header
                 }
                 else
@@ -96,7 +136,6 @@ namespace Frontend.Views
             if (packet == null) return;
 
             string action = packet.action;
-            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
 
             switch (action)
             {
@@ -105,87 +144,234 @@ namespace Frontend.Views
                         this.Close();
                     }));
                     break;
-
                 case "ADD_AND_SAVE_MST":
                     try
                     {
-                        // 1. Kiểm tra dữ liệu đầu vào (phòng hờ lỗi từ JS)
+                        // 1. Kiểm tra dữ liệu đầu vào từ JS
                         if (packet.data == null || packet.data.mst == null)
                         {
-                            MessageBox.Show("Dữ liệu không hợp lệ!", "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync("window.showAlert('Thông báo', 'Dữ liệu không hợp lệ!', 'warning')");
                             break;
                         }
 
-                        List<dynamic> listAdd = new List<dynamic>();
-                        if (File.Exists(filePath))
+                        // 2. Chuyển đổi dữ liệu từ dynamic sang Model chuẩn
+                        // Giả sử Model của Thắng có các trường: Mst, Password, Company
+                        var newCompany = new CompanyModel
                         {
-                            string content = File.ReadAllText(filePath);
-                            listAdd = JsonConvert.DeserializeObject<List<dynamic>>(content) ?? new List<dynamic>();
+                            Mst = packet.data.mst,
+                            Password = packet.data.password,
+                            CompanyName = packet.data.company
+                        };
+
+                        // 3. CẬP NHẬT RAM: Thêm vào List cache ngay lập tức để sử dụng tức thì
+                        if (_cachedCompanies == null) _cachedCompanies = new List<CompanyModel>();
+
+                        // Kiểm tra trùng MST để tránh nạp trùng vào RAM
+                        var existing = _cachedCompanies.FirstOrDefault(c => c.Mst == newCompany.Mst);
+                        if (existing != null)
+                        {
+                            _cachedCompanies.Remove(existing); // Nếu trùng thì xóa cũ thay mới
                         }
+                        _cachedCompanies.Add(newCompany);
 
-                        // 2. Thêm dữ liệu mới
-                        listAdd.Add(packet.data);
-
-                        // 3. Thực hiện ghi file
-                        string jsonOutput = JsonConvert.SerializeObject(listAdd, Newtonsoft.Json.Formatting.Indented);
+                        // 4. GHI FILE: Thực hiện ghi xuống ổ cứng để lưu trữ lâu dài
+                        // Thắng nên dùng Formatting.Indented để file JSON dễ đọc
+                        string jsonOutput = JsonConvert.SerializeObject(_cachedCompanies, Newtonsoft.Json.Formatting.Indented);
                         File.WriteAllText(filePath, jsonOutput);
 
-                        // 4. CHỈ THÔNG BÁO THÀNH CÔNG KHI MỌI THỨ XONG XUÔI
-                           MessageBox.Show(
-                             "Hệ thống đã ghi dữ liệu thành công!",
-                             "TaxSolution - Thông báo hệ thống",
-                             MessageBoxButtons.OK,
-                             MessageBoxIcon.Information
-                         );
+                        // 5. PHẢN HỒI GIAO DIỆN: Gom lệnh để chạy cực nhanh
+                        // Vừa hiện alert đẹp, vừa đóng modal thêm mới (nếu có), vừa render lại dropdown
+                        string jsSuccess = $@"
+            (function() {{
+                window.showAlert('Thành công', 'Đã lưu công ty {newCompany.Mst} thành công!', 'success');
+                if(window.renderCompanyDropdown) window.renderCompanyDropdown(); // Cập nhật lại list trên web
+            }})();";
+
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(jsSuccess);
                     }
                     catch (Exception ex)
                     {
-                        // 1. Ghi log lỗi ra cửa sổ Output của Visual Studio để Thắng dễ debug
-                        System.Diagnostics.Debug.WriteLine("Lỗi lưu file: " + ex.Message);
+                        System.Diagnostics.Debug.WriteLine("Lỗi ADD_AND_SAVE_MST: " + ex.Message);
 
-                        // 2. Kiểm tra nếu WebView2 sẵn sàng thì hiện Modal đẹp của Thắng
-                        if (webViewUser != null && webViewUser.CoreWebView2 != null)
+                        string errorMsg = ex.Message.Replace("'", "\\'").Replace("\n", " ");
+                        if (webViewUser?.CoreWebView2 != null)
                         {
-                            string errorMsg = ex.Message.Replace("'", "").Replace("\n", " ");
-                            await webViewUser.CoreWebView2.ExecuteScriptAsync(
-                                $"window.showAlert('Lỗi hệ thống', 'Không thể ghi file JSON: {errorMsg}', 'error')"
-                            );
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi hệ thống', '{errorMsg}', 'error')");
                         }
                         else
                         {
-                            // 3. Nếu WebView2 chưa sẵn sàng (đang bị Null) thì dùng MessageBox chữa cháy
-                            MessageBox.Show(
-                                $"Lỗi nghiêm trọng: {ex.Message}",
-                                "TaxSolution - Lỗi ghi file",
-                                MessageBoxButtons.OK,
-                                MessageBoxIcon.Error
-                            );
+                            MessageBox.Show($"Lỗi nghiêm trọng: {ex.Message}", "Hệ thống");
                         }
                     }
                     break;
-
                 case "DELETE_AND_SAVE_MST":
-                    if (File.Exists(filePath))
+                    try
                     {
-                        try
-                        {
-                            string content = File.ReadAllText(filePath);
-                            var listDelete = JsonConvert.DeserializeObject<List<dynamic>>(content) ?? new List<dynamic>();
+                        string mstToDelete = packet.mst;
+                        if (string.IsNullOrEmpty(mstToDelete)) break;
 
-                            string mstToDelete = packet.mst;
-                            // Dùng ToList() để thực hiện lọc
-                            var filteredList = listDelete.Where(x => (string)x.mst != mstToDelete).ToList();
-
-                            File.WriteAllText(filePath, JsonConvert.SerializeObject(filteredList, Formatting.Indented));
-                        }
-                        catch (Exception ex)
+                        // 1. TỐI ƯU: Xóa trực tiếp trên RAM (List đã cache)
+                        // Việc xóa trên List này cực nhanh (gần như 0ms)
+                        if (_cachedCompanies != null)
                         {
-                            System.Diagnostics.Debug.WriteLine("Lỗi xóa: " + ex.Message);
+                            var itemToRemove = _cachedCompanies.FirstOrDefault(x => x.Mst == mstToDelete);
+                            if (itemToRemove != null)
+                            {
+                                _cachedCompanies.Remove(itemToRemove);
+                            }
                         }
+
+                        // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
+                        string jsonOutput = JsonConvert.SerializeObject(_cachedCompanies, Newtonsoft.Json.Formatting.Indented);
+                        File.WriteAllText(filePath, jsonOutput);
+
+                        // 3. PHẢN HỒI GIAO DIỆN: Gom lệnh để Web cập nhật ngay lập tức
+                        string jsDeleteSuccess = $@"
+            (function() {{
+                // 1. Thông báo
+                window.showAlert('Thành công', 'Đã xóa MST {mstToDelete}!', 'success');
+                
+                // 2. TỐI ƯU: Xóa phần tử đó trên giao diện Web mà không cần load lại trang
+                // Giả sử Thắng có hàm render lại list hoặc xóa element theo ID
+                if(window.renderCompanyDropdown) window.renderCompanyDropdown();
+                
+                console.log('Hệ thống: Đã đồng bộ xóa giữa RAM, File và UI');
+            }})();";
+
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(jsDeleteSuccess);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Lỗi DELETE_AND_SAVE_MST: " + ex.Message);
+
+                        // Bắn lỗi ra giao diện Web nếu có sự cố ghi file
+                        string safeError = ex.Message.Replace("'", "\\'");
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi', '{safeError}', 'error')");
                     }
                     break;
                 case "GET_SETTINGS_DATA":
                     await SendJsonDataToWeb(filePath);
+                    break;
+                case "REFRESH_CAPTCHA":
+                    await LoadCaptchaToUI();
+                    break;
+                case "REQUEST_OPEN_CAPTCHA":
+                    System.Diagnostics.Debug.WriteLine(">>> Hệ thống: Đã nhận lệnh REQUEST_OPEN_CAPTCHA từ giao diện!");
+                    await LoadCaptchaToUI();
+                    break;
+                case "SUBMIT_CAPTCHA":
+                    try
+                    {
+                        string selectedMst = packet.data.taxCode;
+                        string captcha = packet.data.captcha;
+
+                        var currentCompany = _cachedCompanies?.FirstOrDefault(c => c.Mst == selectedMst);
+
+                        if (currentCompany == null)
+                        {
+                            _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi', 'Không tìm thấy MST {selectedMst} !', 'error')");
+                            break;
+                        }
+
+                        // Gọi API
+                        var (loginStatus, loginMessage) = await _taxService.LoginTax(selectedMst, currentCompany.Password, captcha);
+
+                        if (loginStatus == "success")
+                        {
+                            // 1. Cập nhật UI ngay lập tức (Không đợi)
+                            string jsUpdate = "(function() { if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true); })();";
+                            _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsUpdate);
+
+                            // 2. Delay một chút xíu (100ms) để UI kịp vẽ xong chữ 'Đăng xuất' rồi mới hiện Box
+                            await Task.Delay(100);
+                            MessageBox.Show("Đăng nhập trang thuế thành công!", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            string safeMsg = (loginMessage ?? "").Replace("'", "\\'").Replace("\n", " ");
+
+                            // Luôn đảm bảo nút được mở khóa nếu thất bại
+                            string jsReset = $"(function() {{ if(window.updateLoginStatus) window.updateLoginStatus(false); }})();";
+
+                            if (loginStatus == "error_captcha")
+                            {
+                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsReset);
+                                MessageBox.Show($"Mã Captcha không chính xác: {safeMsg}", "Sai Captcha", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                                // Nạp captcha mới ngầm
+                                _ = LoadCaptchaToUI();
+                            }
+                            else
+                            {
+                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsReset);
+                                MessageBox.Show($"Lỗi: {safeMsg}", "Lỗi đăng nhập", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Giải phóng nút khi có crash code
+                        _ = webViewUser.CoreWebView2.ExecuteScriptAsync("if(window.updateLoginStatus) window.updateLoginStatus(false);");
+                        System.Diagnostics.Debug.WriteLine("CRITICAL ERROR: " + ex.Message);
+                        MessageBox.Show("Lỗi hệ thống: " + ex.Message, "Hệ thống", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                    }
+                    break;
+                // Trong phần xử lý Message từ WebView2
+                case "REQUEST_LOGOUT":
+
+                    var (status, message) = await _taxService.LogoutTaxAsync();
+
+                    if (status == "success")
+                    {
+                        // 1. Thông báo thành công cho giao diện Web
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                            $"window.showAlert('Thành công', '{message}', 'success')"
+                        );
+
+                        // 2. Tự động reload lại trang để xóa sạch dữ liệu cũ trên giao diện
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync("window.location.reload()");
+                    }
+                    else
+                    {
+                        // Thông báo lỗi nếu Logout thất bại
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                            $"window.showAlert('Lỗi Logout', '{message}', 'error')"
+                        );
+                    }
+                    break;
+                case "SEARCH_INVOICE":
+                    List<dynamic> invoices = null;
+                    string from = packet.data.fromDate;
+                    string to = packet.data.toDate;
+
+                    try
+                    {
+                        var result = await _taxService.SearchInvoices(from, to);
+
+                         status = result.Status;
+                         message = result.Message;
+                        invoices = result.Invoices; 
+
+                        if (status == "success")
+                        {
+                            if (invoices != null && invoices.Count > 0)
+                            {
+                                MessageBox.Show($"Tìm thấy {invoices.Count} hóa đơn.", "Thành công");
+                            }
+                            else
+                            {
+                                MessageBox.Show("Không có hóa đơn nào.", "Thông báo");
+                            }
+                        }
+                        else
+                        {
+                            MessageBox.Show(message, "Lỗi");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("Lỗi thực thi: " + ex.Message);
+                    }
                     break;
             }
         }
@@ -209,6 +395,51 @@ namespace Frontend.Views
         {
             // Lệnh này sẽ quét sạch tất cả các Form đang ẩn và đóng toàn bộ App
             Application.Exit();
+        }
+
+        private async Task LoadCaptchaToUI()
+        {
+            string captchaData = await _taxService.GetCaptchaBase64();
+
+            if (!string.IsNullOrEmpty(captchaData))
+            {
+                if (!captchaData.StartsWith("data:image"))
+                    captchaData = "data:image/png;base64," + captchaData;
+
+                // Lưu ý: Tất cả dấu { và } của JavaScript phải viết thành {{ và }}
+                string jsCommand = $@"
+        (function() {{
+            if(window.openCaptcha) {{
+                window.openCaptcha('{captchaData}');
+                
+                const input = document.getElementById('input-captcha');
+                if(input) {{
+                    input.value = ''; 
+                    setTimeout(function() {{ 
+                        input.focus(); 
+                    }}, 150);
+                }}
+            }}
+        }})();";
+
+                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsCommand);
+            }
+        }
+        private void LoadCompaniesToRAM()
+        {
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    string jsonContent = File.ReadAllText(filePath);
+                    _cachedCompanies = JsonConvert.DeserializeObject<List<CompanyModel>>(jsonContent) ?? new List<CompanyModel>();
+                    System.Diagnostics.Debug.WriteLine($">>> RAM: Đã nạp {_cachedCompanies.Count} công ty.");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Lỗi nạp cache: " + ex.Message);
+            }
         }
     }
 }

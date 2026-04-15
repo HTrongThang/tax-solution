@@ -8,12 +8,16 @@
                      max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap">
                     <option value="">Đang tải danh sách...</option>
                 </select>
-                <button id="btn-login" onclick="openCaptcha()" class="ml-2 text-[10px] font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-md hover:bg-emerald-600 hover:text-white transition-all uppercase active:scale-95">
+                <button id="btn-auth"
+                        onclick="handleAuthAction(this)"
+                        class="ml-2 text-[10px] font-bold px-3 py-1 rounded-md transition-all uppercase active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white">
                     Đăng nhập
                 </button>
+
             </div>
           
         </div>
+
 
         <div class="flex items-center justify-between pt-3">
             <div class="flex items-center gap-3">
@@ -41,16 +45,27 @@
                     </select>
                 </div>
                 <div class="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
-                    <input type="date" id="date-from" value="2026-04-01"
-                           class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px]">
+                    <input type="date"
+                           id="date-from"
+                           value="2026-04-01"
+                           max="2026-04-15"
+                           onfocus="this.showPicker()"
+                           class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
+
                     <span class="text-slate-300">→</span>
-                    <input type="date" id="date-to" value="2026-04-13"
-                           class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px]">
+
+                    <input type="date"
+                           id="date-to"
+                           value="2026-04-13"
+                           max="2026-04-15"
+                           onfocus="this.showPicker()"
+                           class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
                 </div>
             </div>
 
             <div class="flex items-center gap-1 bg-slate-50/80 p-1 rounded-2xl border border-slate-100">
-                <button class="bg-slate-900 text-white px-4 py-2 rounded-xl text-[11px] font-bold hover:bg-emerald-600 transition-all flex items-center gap-2 uppercase shadow-sm">
+                <button onclick="handleSearchClick()"
+                        class="bg-slate-900 text-white px-4 py-2 rounded-xl text-[11px] font-bold hover:bg-emerald-600 transition-all flex items-center gap-2 uppercase shadow-sm active:scale-95">
                     🔍 Tìm kiếm
                 </button>
 
@@ -107,7 +122,7 @@
             <img id="img-captcha" src="https://via.placeholder.com/150x50?text=4WSANG" alt="captcha" class="h-12">
         </div>
 
-        <input type="text" id="input-captcha" placeholder="Mã xác nhận"
+        <input type="text" id="input-captcha" placeholder="Mã xác nhận" autocomplete="off"
                class="w-full border-b-2 border-slate-200 outline-none focus:border-emerald-500 text-center text-xl font-mono tracking-widest py-2 mb-6 uppercase">
 
         <div class="flex gap-2">
