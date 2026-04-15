@@ -106,102 +106,96 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 		return fmt.Errorf("TRÌNH DUYỆT CHƯA MỞ: Vui lòng gọi /init trước")
 	}
 
-	// 1. Điền thông tin
-	// Đối với Element đã lấy ra (el), Thu dùng .SelectText(".*") để chọn toàn bộ nội dung
-	c.Page.MustElement(".ant-modal-content #username").MustSelectText(".*").MustInput("") // Xóa trắng
-	c.Page.MustElement(".ant-modal-content #username").MustInput(user)
-
-	c.Page.MustElement(".ant-modal-content #password").MustSelectText(".*").MustInput("") // Xóa trắng
-	c.Page.MustElement(".ant-modal-content #password").MustInput(pass)
+	// --- 1. ĐIỀN THÔNG TIN ---
+	// Sử dụng MustClick trước khi Input để React nhận diện Focus State
+	c.Page.MustElement(".ant-modal-content #username").MustClick().MustSelectText(".*").MustInput(user)
+	c.Page.MustElement(".ant-modal-content #password").MustClick().MustSelectText(".*").MustInput(pass)
 
 	elCap := c.Page.MustElement(".ant-modal-content #cvalue")
-	elCap.MustSelectText(".*").MustInput("") // Chọn tất cả bằng Regex ".*" rồi xóa
-	elCap.MustInput(captcha)
+	elCap.MustClick().MustSelectText(".*").MustInput(captcha)
 
-	// Ép React/Ant Design nhận diện sự thay đổi dữ liệu
-	elCap.MustEval(`() => {
-        this.dispatchEvent(new Event('input', { bubbles: true }));
-        this.dispatchEvent(new Event('change', { bubbles: true }));
-        this.blur();
+	// Ép React/Ant Design nhận diện sự thay đổi dữ liệu (Trigger Events)
+	c.Page.MustEval(`() => {
+        const ev = { bubbles: true };
+        document.querySelectorAll('.ant-modal-content input').forEach(i => {
+            i.dispatchEvent(new Event('input', ev));
+            i.dispatchEvent(new Event('change', ev));
+        });
     }`)
 
-	// 2. CLICK ĐĂNG NHẬP
-	// Tìm đúng nút Primary trong Modal để click
+	// --- 2. CLICK ĐĂNG NHẬP ---
 	c.Page.MustElement(".ant-modal-content button.ant-btn-primary").MustClick()
 
-	// 3. VÒNG LẶP KIỂM TRA LỖI (Quét liên tục trong 5 giây)
+	// --- 3. VÒNG LẶP KIỂM TRA (CHỐT KẾT QUẢ) ---
 	fmt.Println("⏳ Đang quét lỗi và trạng thái hệ thống...")
 
-	for i := 0; i < 20; i++ {
-		// 1. Dùng Has để kiểm tra lỗi một cách nhẹ nhàng (Không dùng Must để tránh Panic)
-		hasErr, el, _ := c.Page.Has(".ant-notification-notice-message, .ant-message-error, .ant-form-item-explain-error")
+	for i := 0; i < 25; i++ {
+		// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế Thắng gửi)
+		// Check nút Logout (mũi tên phải), icon User, icon Bell
+		hasSuccess, _, _ := c.Page.Has(".anticon-arrow-right, .anticon-user, .anticon-bell")
 
-		if hasErr {
-			// Dùng Element thay vì MustElement để lấy text an toàn
-			msg := ""
-			if el != nil {
-				msg, _ = el.Text()
-			}
-			fmt.Printf("❌ Thất bại: %s\n", msg)
+		// Check URL (Chỉ tin thành công nếu URL chứa domain thuế và KHÔNG chứa chữ login/auth)
+		currURL := c.Page.MustInfo().URL
+		isAuthPage := strings.Contains(strings.ToLower(currURL), "login") || strings.Contains(strings.ToLower(currURL), "auth")
 
-			// Nếu là lỗi Captcha
-			if strings.Contains(strings.ToLower(msg), "captcha") || strings.Contains(strings.ToLower(msg), "mã xác nhận") {
-				// CỰC KỲ QUAN TRỌNG: Không dùng MustClick ở đây vì nó sẽ gây treo Postman
-				// Mình chỉ cần báo lỗi về, việc click đổi ảnh để sau
-				return fmt.Errorf("SAI_CAPTCHA: %s", msg)
-			}
-
-			// Trả lỗi đăng nhập thông thường về ngay
-			return fmt.Errorf("LOI_DANG_NHAP: %s", msg)
-		}
-
-		// 2. Kiểm tra thành công
-		if hasLogout, _, _ := c.Page.Has(".anticon-logout"); hasLogout {
-			fmt.Println("✅ Đăng nhập thành công!")
+		if hasSuccess && !isAuthPage {
+			fmt.Println("✅ Đăng nhập thành công thực tế!")
 			return nil
 		}
 
-		time.Sleep(250 * time.Millisecond)
+		// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 5 ~ 1.5 giây để tránh lỗi cũ)
+		if i > 5 {
+			hasErr, el, _ := c.Page.Has(".ant-notification-notice-message, .ant-message-error, .ant-form-item-explain-error")
+			if hasErr {
+				msg, _ := el.Text()
+				if msg != "" {
+					fmt.Printf("❌ Thất bại xác thực: %s\n", msg)
+
+					// Trả về lỗi định dạng để C# xử lý logic hiện Alert
+					if strings.Contains(strings.ToLower(msg), "captcha") || strings.Contains(strings.ToLower(msg), "mã xác nhận") {
+						return fmt.Errorf("SAI_CAPTCHA: %s", msg)
+					}
+					return fmt.Errorf("LOI_DANG_NHAP: %s", msg)
+				}
+			}
+		}
+
+		time.Sleep(300 * time.Millisecond)
 	}
 
-	// 4. CHỐT CHẶN CUỐI CÙNG: Kiểm tra URL nếu Modal đã đóng mà chưa thấy lỗi
-	currURL := c.Page.MustInfo().URL
-	if strings.Contains(currURL, "gdt.gov.vn") && !strings.Contains(currURL, "login") {
-		return nil
-	}
-
-	return fmt.Errorf("TIMEOUT: Hệ thống không báo lỗi nhưng không vào được trang chủ")
+	// --- 4. CHỐT CHẶN CUỐI CÙNG ---
+	// Nếu hết 7.5 giây mà vẫn thấy trang Login hoặc không thấy nút Logout
+	return fmt.Errorf("TIMEOUT: Hệ thống không phản hồi hoặc sai thông tin đăng nhập")
 }
 func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models.Invoice, error) {
-	// 1. Điều hướng menu (Mở trang Tra cứu hóa đơn)
 	var allInvoices []models.Invoice
 	c.GrantPermissions()
+
+	// 1. Điều hướng Menu
 	fmt.Println("🚀 Đang mở trang Tra cứu...")
-
 	c.Page.MustWaitLoad()
-
 	c.Page.MustElementR(".ml-menu-item span", "Tra cứu").MustClick()
 
 	fmt.Println("🖱️ Đang vào phân mục Tra cứu hóa đơn...")
 	c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible().MustClick()
-
 	c.Page.MustWaitIdle()
 	time.Sleep(1 * time.Second)
 
-	// --- GIỮ NGUYÊN HÀM PHỤ selectDateOnCalendar CỦA THẮNG ---
+	// --- Hàm phụ chọn lịch (Giữ nguyên vì Thắng chạy đang ổn) ---
 	selectDateOnCalendar := func(selector string, dateStr string) {
 		parts := strings.Split(dateStr, "/")
+		if len(parts) < 3 {
+			return
+		}
 		dayst := strings.TrimLeft(parts[0], "0")
 		monthst := parts[1]
 		yearst := parts[2]
 
-		fmt.Printf("📅 Đang chọn %s cho ô %s...\n", dateStr, selector)
 		elInput := c.Page.MustElement(selector)
 		elInput.MustClick()
-		time.Sleep(800 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 
-		// Vòng lặp Năm (Giữ nguyên)
-		for {
+		for i := 0; i < 20; i++ {
 			calYear := c.Page.MustElement(".ant-calendar-year-select").MustText()
 			if calYear == yearst {
 				break
@@ -211,11 +205,8 @@ func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models
 			} else {
 				c.Page.MustElement(".ant-calendar-prev-year-btn").MustClick()
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
-
-		// Vòng lặp Tháng (Giữ nguyên)
-		for {
+		for i := 0; i < 12; i++ {
 			calMonthFull := c.Page.MustElement(".ant-calendar-month-select").MustText()
 			calMonth := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(calMonthFull, "Thg", ""), "Tháng", ""))
 			if calMonth == monthst {
@@ -226,10 +217,7 @@ func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models
 			} else {
 				c.Page.MustElement(".ant-calendar-prev-month-btn").MustClick()
 			}
-			time.Sleep(100 * time.Millisecond)
 		}
-
-		// Click chọn Ngày (Giữ nguyên)
 		cells := c.Page.MustElements(".ant-calendar-table .ant-calendar-cell")
 		for _, cell := range cells {
 			if cell.MustText() == dayst {
@@ -242,39 +230,57 @@ func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models
 		}
 	}
 
-	// --- THỰC THI TRA CỨU ---
-	// 1. Thực hiện chọn 2 ô ngày
+	// 2. Điền ngày và Tìm kiếm
 	selectDateOnCalendar("#tngay input", fromDate)
 	selectDateOnCalendar("#dngay input", toDate)
 
-	// 2. Nhấn Tìm kiếm
 	fmt.Println("🖱️ Đang nhấn nút Tìm kiếm...")
 	c.Page.MustElement("button.ant-btn-primary[type='submit']").MustClick()
 
-	// 3. Đợi dữ liệu bảng tải lên
-	fmt.Println("⏳ Đang đợi dữ liệu bảng tải lên...")
-	c.Page.Timeout(20 * time.Second).MustElement(".ant-table-tbody").MustWaitVisible()
-	time.Sleep(2 * time.Second)
+	// 3. Vòng lặp bóc tách và Phân trang
+	for pageIdx := 1; ; pageIdx++ {
+		fmt.Printf("⏳ Đang xử lý trang %d...\n", pageIdx)
 
-	// 4. BÓC TÁCH DỮ LIỆU (Thay vì trả về rows trực tiếp)
-	var invoiceList []models.Invoice
-	// rows := c.Page.MustElements(".ant-table-tbody tr")
+		// CHIẾN THUẬT: Đợi dữ liệu thực sự (Ưu tiên hàng dữ liệu)
+		foundData := false
+		for i := 0; i < 40; i++ {
+			// Nếu thấy dòng dữ liệu (tr có class ant-table-row)
+			if has, _, _ := c.Page.Has(".ant-table-tbody tr.ant-table-row"); has {
+				foundData = true
+				break
+			}
 
-	for {
-		fmt.Println("⏳ Đang đợi dữ liệu bảng tải lên...")
-		c.Page.Timeout(20 * time.Second).MustElement(".ant-table-tbody").MustWaitVisible()
-		time.Sleep(1500 * time.Millisecond) // Đợi chút cho dữ liệu đổ vào tr
+			// Chỉ tin là "Không có dữ liệu" sau khi đã đợi ít nhất 3 giây (i > 8)
+			// Để tránh bắt nhầm cái Placeholder của lần tìm kiếm cũ
+			if i > 8 {
+				if has, _, _ := c.Page.Has(".ant-table-placeholder"); has {
+					txt, _ := c.Page.MustElement(".ant-table-placeholder").Text()
+					if strings.Contains(txt, "Không có dữ liệu") {
+						fmt.Println("ℹ️ Trang Thuế xác nhận: Không có dữ liệu.")
+						return allInvoices, nil
+					}
+				}
+			}
+			time.Sleep(350 * time.Millisecond)
+		}
 
-		// 1. Bóc tách dữ liệu trang hiện tại
-		rows := c.Page.MustElements(".ant-table-tbody tr")
+		if !foundData {
+			fmt.Println("⚠️ Timeout hoặc không thấy bảng dữ liệu.")
+			break
+		}
+
+		// Bóc tách trang hiện tại
+		rows := c.Page.MustElements(".ant-table-tbody tr.ant-table-row")
 		for _, row := range rows {
 			cols := row.MustElements("td")
 			if len(cols) >= 10 {
-				// Thắng kiểm tra lại thứ tự cột trên máy Thắng nhé, thường là:
-				// cols[1]: Ký hiệu, cols[2]: Số hóa đơn, cols[3]: Ngày lập,
-				// cols[4]: MST người bán, cols[5]: Tên người bán...
+				stt := strings.TrimSpace(cols[0].MustText())
+				if stt == "" || stt == "Không có dữ liệu" {
+					continue
+				}
+
 				inv := models.Invoice{
-					STT:         strings.TrimSpace(cols[0].MustText()),
+					STT:         stt,
 					KyHieu:      strings.TrimSpace(cols[1].MustText()),
 					SoHoaDon:    strings.TrimSpace(cols[2].MustText()),
 					NgayLap:     strings.TrimSpace(cols[3].MustText()),
@@ -283,33 +289,30 @@ func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models
 					TongTien:    strings.TrimSpace(cols[7].MustText()),
 					TrangThai:   strings.TrimSpace(cols[9].MustText()),
 				}
-				if inv.STT != "" && inv.STT != "Không có dữ liệu" {
-					allInvoices = append(allInvoices, inv)
-				}
+				allInvoices = append(allInvoices, inv)
 			}
 		}
 
-		// 2. KIỂM TRA VÀ NHẤN TRANG TIẾP THEO
-		// Tìm nút mũi tên sang phải (Next Page)
+		// 4. Xử lý chuyển trang
 		nextBtn, err := c.Page.Element(".ant-pagination-next")
 		if err != nil {
-			break // Không thấy nút phân trang thì dừng
+			break
 		}
 
-		// Kiểm tra xem nút Next có bị xám (disabled) không
 		classAttr, _ := nextBtn.Attribute("class")
 		if classAttr != nil && strings.Contains(*classAttr, "ant-pagination-disabled") {
-			fmt.Println("✅ Đã lấy hết tất cả các trang!")
-			break // Nếu bị disabled nghĩa là đã ở trang cuối
+			fmt.Println("✅ Đã lấy hết tất cả các trang.")
+			break
 		}
 
 		fmt.Println("⏭️ Đang sang trang tiếp theo...")
 		nextBtn.MustClick()
-		time.Sleep(1 * time.Second)
+		c.Page.MustWaitIdle()
+		time.Sleep(2 * time.Second) // Đợi bảng mới render hoàn toàn
 	}
 
-	fmt.Printf("📂 Thành công! Tìm thấy %d hóa đơn.\n", len(invoiceList))
-	return invoiceList, nil
+	fmt.Printf("📂 Xong! Tổng cộng lấy được %d hóa đơn.\n", len(allInvoices))
+	return allInvoices, nil
 }
 func (c *CrawlerService) GrantPermissions() {
 	homeDir, _ := os.UserHomeDir()
@@ -533,4 +536,21 @@ func (c *CrawlerService) retry(attempts int, sleep time.Duration, f func() bool)
 		time.Sleep(sleep)
 	}
 	return fmt.Errorf("timeout sau %d lần thử", attempts)
+}
+func (s *CrawlerService) Logout() error {
+	if s.Browser == nil {
+		return nil
+	}
+
+	// Đóng toàn bộ trình duyệt và giải phóng tiến trình chrome.exe
+	err := s.Browser.Close()
+	if err != nil {
+		return err
+	}
+
+	// Sau khi Close, biến Browser sẽ không dùng được nữa cho đến khi Init lại
+	s.Browser = nil
+
+	fmt.Println("Hệ thống: Đã đóng trình duyệt Chrome.")
+	return nil
 }

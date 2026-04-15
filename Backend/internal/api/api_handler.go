@@ -31,6 +31,7 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 		taxRoutes.GET("/searchInvoice", h.GetInvoices)
 		taxRoutes.POST("/start-crawl", h.StartCrawl)
 		taxRoutes.GET("/status", h.CheckCrawlStatus)
+		taxRoutes.POST("/logout", h.LogoutTax)
 	}
 }
 
@@ -75,7 +76,7 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 func (h *Handler) LoginTax(c *gin.Context) {
 	var req models.LoginRequest
 
-	// 1. Nhận JSON từ .NET/Postman
+	// 1. Nhận JSON
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, models.Response{
 			Status:  "error",
@@ -84,21 +85,29 @@ func (h *Handler) LoginTax(c *gin.Context) {
 		return
 	}
 
-	// 2. Gọi hàm Login và hứng kết quả lỗi
+	// --- BẮT ĐẦU ĐO Ở ĐÂY ---
+	startTime := time.Now()
+	fmt.Printf("---> [GO] Bắt đầu quá trình Login cho MST: %s\n", req.TaxCode)
+
+	// 2. Gọi hàm Login (Bước giả lập tốn thời gian nhất)
 	err := h.Crawler.Login(req.TaxCode, req.Password, req.Captcha)
+
+	// --- KẾT THÚC ĐO ---
+	duration := time.Since(startTime)
+	fmt.Printf("---> [GO] Hoàn tất Login sau: %v\n", duration)
+	// ----------------------
 
 	// 3. Xử lý trả lỗi về FE
 	if err != nil {
 		errStr := err.Error()
 		statusType := "error"
 
-		// Kiểm tra xem có phải lỗi Captcha không để báo hiệu cho .NET
 		if strings.Contains(errStr, "SAI_CAPTCHA") {
 			statusType = "error_captcha"
 		}
 
 		c.JSON(http.StatusUnauthorized, models.Response{
-			Status:  statusType, // Trả về mã loại lỗi riêng
+			Status:  statusType,
 			Message: errStr,
 		})
 		return
@@ -201,4 +210,23 @@ func (h *Handler) CheckCrawlStatus(c *gin.Context) {
 		"current_status": h.Crawler.CurrentStatus,
 		"total_invoices": h.Crawler.TotalInvoices,
 	})
+}
+func (h *Handler) LogoutTax(c *gin.Context) {
+	err := h.Crawler.Logout()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Không thể dọn dẹp trình duyệt: " + err.Error(),
+		})
+		return
+	}
+
+	// 2. Trả về thông báo thành công cho C#
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Đã đăng xuất và đóng các phiên làm việc cũ!",
+	})
+
+	fmt.Println("Hệ thống: API Logout đã thực thi xong.")
 }
