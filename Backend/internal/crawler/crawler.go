@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -169,150 +170,212 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 }
 func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models.Invoice, error) {
 	var allInvoices []models.Invoice
-	c.GrantPermissions()
 
-	// 1. Điều hướng Menu
-	fmt.Println("🚀 Đang mở trang Tra cứu...")
+	// --- 1. ĐIỀU HƯỚNG MENU ---
+	fmt.Println("📍 [STEP 1] Đang mở Menu...")
 	c.Page.MustWaitLoad()
-	c.Page.MustElementR(".ml-menu-item span", "Tra cứu").MustClick()
 
-	fmt.Println("🖱️ Đang vào phân mục Tra cứu hóa đơn...")
-	c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible().MustClick()
+	// Kiểm tra xem có tìm thấy menu Tra cứu không
+	menuTraCuu := c.Page.MustElementR(".ml-menu-item span", "Tra cứu")
+	fmt.Println("👉 Đã tìm thấy menu 'Tra cứu', đang click...")
+	menuTraCuu.MustClick()
+
+	fmt.Println("👉 Đang tìm link 'Tra cứu hóa đơn'...")
+	linkTraCuu := c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible()
+	linkTraCuu.MustClick()
+
 	c.Page.MustWaitIdle()
-	time.Sleep(1 * time.Second)
+	fmt.Println("✅ Đã vào trang Tra cứu hóa đơn thành công.")
 
-	// --- Hàm phụ chọn lịch (Giữ nguyên vì Thắng chạy đang ổn) ---
-	selectDateOnCalendar := func(selector string, dateStr string) {
-		parts := strings.Split(dateStr, "/")
-		if len(parts) < 3 {
-			return
-		}
-		dayst := strings.TrimLeft(parts[0], "0")
-		monthst := parts[1]
-		yearst := parts[2]
-
-		elInput := c.Page.MustElement(selector)
-		elInput.MustClick()
-		time.Sleep(500 * time.Millisecond)
-
-		for i := 0; i < 20; i++ {
-			calYear := c.Page.MustElement(".ant-calendar-year-select").MustText()
-			if calYear == yearst {
-				break
-			}
-			if yearst > calYear {
-				c.Page.MustElement(".ant-calendar-next-year-btn").MustClick()
-			} else {
-				c.Page.MustElement(".ant-calendar-prev-year-btn").MustClick()
-			}
-		}
-		for i := 0; i < 12; i++ {
-			calMonthFull := c.Page.MustElement(".ant-calendar-month-select").MustText()
-			calMonth := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(calMonthFull, "Thg", ""), "Tháng", ""))
-			if calMonth == monthst {
-				break
-			}
-			if monthst > calMonth {
-				c.Page.MustElement(".ant-calendar-next-month-btn").MustClick()
-			} else {
-				c.Page.MustElement(".ant-calendar-prev-month-btn").MustClick()
-			}
-		}
-		cells := c.Page.MustElements(".ant-calendar-table .ant-calendar-cell")
-		for _, cell := range cells {
-			if cell.MustText() == dayst {
-				classPtr := cell.MustAttribute("class")
-				if classPtr != nil && !strings.Contains(*classPtr, "last-month-cell") && !strings.Contains(*classPtr, "next-month-btn-day") {
-					cell.MustClick()
-					break
-				}
-			}
-		}
-	}
-
-	// 2. Điền ngày và Tìm kiếm
-	selectDateOnCalendar("#tngay input", fromDate)
-	selectDateOnCalendar("#dngay input", toDate)
+	// --- 2. ĐIỀN NGÀY VÀ TÌM KIẾM ---
+	fmt.Printf("📍 [STEP 2] Đang điền ngày: %s -> %s\n", fromDate, toDate)
+	c.selectDateOnCalendar("#tngay input", fromDate)
+	c.selectDateOnCalendar("#dngay input", toDate)
 
 	fmt.Println("🖱️ Đang nhấn nút Tìm kiếm...")
 	c.Page.MustElement("button.ant-btn-primary[type='submit']").MustClick()
 
-	// 3. Vòng lặp bóc tách và Phân trang
-	for pageIdx := 1; ; pageIdx++ {
-		fmt.Printf("⏳ Đang xử lý trang %d...\n", pageIdx)
+	// --- 3. VÒNG LẶP BÓC TÁCH ---
+	maxPages := 1
 
-		// CHIẾN THUẬT: Đợi dữ liệu thực sự (Ưu tiên hàng dữ liệu)
+	for pageIdx := 1; ; pageIdx++ {
+		fmt.Printf("\n--- 📑 ĐANG XỬ LÝ TRANG %d ---\n", pageIdx)
 		foundData := false
+		var resultText string
+
 		for i := 0; i < 40; i++ {
-			// Nếu thấy dòng dữ liệu (tr có class ant-table-row)
-			if has, _, _ := c.Page.Has(".ant-table-tbody tr.ant-table-row"); has {
+			// Sử dụng ElementR để bắt đúng thẻ span có chữ "Có ... kết quả"
+			el, err := c.Page.ElementR("span", `Có\s\d+\skết quả`)
+
+			if err == nil {
+				resultText = el.MustText()
+				if strings.Contains(resultText, "Có 0 kết quả") {
+					fmt.Println("ℹ️ Web báo 0 kết quả. Dừng cào.")
+					return allInvoices, nil
+				}
+				fmt.Printf("✅ Xác nhận đã có dữ liệu: %s\n", resultText)
 				foundData = true
 				break
 			}
 
-			// Chỉ tin là "Không có dữ liệu" sau khi đã đợi ít nhất 3 giây (i > 8)
-			// Để tránh bắt nhầm cái Placeholder của lần tìm kiếm cũ
-			if i > 8 {
-				if has, _, _ := c.Page.Has(".ant-table-placeholder"); has {
-					txt, _ := c.Page.MustElement(".ant-table-placeholder").Text()
-					if strings.Contains(txt, "Không có dữ liệu") {
-						fmt.Println("ℹ️ Trang Thuế xác nhận: Không có dữ liệu.")
-						return allInvoices, nil
-					}
-				}
-			}
-			time.Sleep(350 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
-
+		fmt.Printf("🔍 DEBUG: Đã tìm thấy thẻ, Nội dung là: [%s]\n", resultText)
 		if !foundData {
-			fmt.Println("⚠️ Timeout hoặc không thấy bảng dữ liệu.")
+			fmt.Printf("❌ [ERROR] Quá thời gian đợi dữ liệu ở trang %d. Chụp ảnh lỗi...\n", pageIdx)
+			c.Page.MustScreenshot(fmt.Sprintf("error_timeout_page_%d.png", pageIdx))
 			break
 		}
 
-		// Bóc tách trang hiện tại
-		rows := c.Page.MustElements(".ant-table-tbody tr.ant-table-row")
-		for _, row := range rows {
-			cols := row.MustElements("td")
-			if len(cols) >= 10 {
-				stt := strings.TrimSpace(cols[0].MustText())
+		// B. Cập nhật số trang
+		if pageInfoEl, err := c.Page.Element("div[class*='PageIndex']"); err == nil {
+			infoText := pageInfoEl.MustText()
+			fmt.Printf("📄 Thông tin phân trang: %s\n", infoText)
+			parts := strings.Split(infoText, "/")
+			if len(parts) == 2 {
+				total, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+				maxPages = total
+			}
+		}
+
+		// C. Bóc dữ liệu Javascript
+		fmt.Println("⚡ Đang bóc dữ liệu bảng bằng Javascript...")
+		remoteData := c.Page.MustEval(`() => {
+            const rows = Array.from(document.querySelectorAll(".ant-table-tbody tr.ant-table-row"));
+            return rows.map(row => {
+                return Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
+            });
+        }`).Arr()
+		fmt.Printf("📦 Trang %d có: %d dòng dữ liệu.\n", pageIdx, len(remoteData))
+
+		// --- E. Map dữ liệu vào Struct ---
+		for _, rowRaw := range remoteData {
+			cols := rowRaw.Arr()
+
+			// Kiểm tra nếu hàng có đủ số cột (thead có 18 cột, check >= 14 là an toàn)
+			if len(cols) >= 14 {
+				stt := cols[0].String()
 				if stt == "" || stt == "Không có dữ liệu" {
 					continue
 				}
 
-				inv := models.Invoice{
+				allInvoices = append(allInvoices, models.Invoice{
 					STT:         stt,
-					KyHieu:      strings.TrimSpace(cols[1].MustText()),
-					SoHoaDon:    strings.TrimSpace(cols[2].MustText()),
-					NgayLap:     strings.TrimSpace(cols[3].MustText()),
-					MSTNguoiBan: strings.TrimSpace(cols[4].MustText()),
-					NguoiBan:    strings.TrimSpace(cols[5].MustText()),
-					TongTien:    strings.TrimSpace(cols[7].MustText()),
-					TrangThai:   strings.TrimSpace(cols[9].MustText()),
-				}
-				allInvoices = append(allInvoices, inv)
+					MSTNguoiBan: cols[1].String(),
+					SoHoaDon:    cols[4].String(), // Đúng theo index 4
+					KyHieu:      cols[3].String(), // Ký hiệu hóa đơn
+					NgayLap:     cols[5].String(), // Ngày lập
+					// Bạn có thể chọn lấy Tổng tiền chưa thuế (7) hoặc Tổng thanh toán (11)
+					TongTien:  cols[11].String(),
+					TrangThai: cols[13].String(), // Trạng thái hóa đơn
+				})
 			}
 		}
+		fmt.Printf("✅ Đã lưu trang %d. Tổng tích lũy: %d hóa đơn.\n", pageIdx, len(allInvoices))
 
-		// 4. Xử lý chuyển trang
-		nextBtn, err := c.Page.Element(".ant-pagination-next")
+		// --- 4. CHUYỂN TRANG ---
+		if pageIdx >= maxPages {
+			fmt.Println("🏁 [FINISH] Đã đạt tới trang cuối cùng.")
+			break
+		}
+
+		iconRight, err := c.Page.Element("i.anticon-right")
 		if err != nil {
+			// Nếu không thấy nút mà vẫn chưa hết trang, có thể do web đổi giao diện
+			fmt.Println("⚠️ Không tìm thấy nút bấm Next qua icon right.")
 			break
 		}
 
-		classAttr, _ := nextBtn.Attribute("class")
-		if classAttr != nil && strings.Contains(*classAttr, "ant-pagination-disabled") {
-			fmt.Println("✅ Đã lấy hết tất cả các trang.")
-			break
-		}
+		// Lấy thẻ button bọc ngoài icon
+		nextBtn := iconRight.MustParent()
 
-		fmt.Println("⏭️ Đang sang trang tiếp theo...")
-		nextBtn.MustClick()
-		c.Page.MustWaitIdle()
-		time.Sleep(2 * time.Second) // Đợi bảng mới render hoàn toàn
+		nextBtn.MustScrollIntoView()
+
+		// Thực hiện click
+		// nextBtn.MustClick()
+		nextBtn.MustEval(`() => this.click()`)
+
+		fmt.Printf("⏳ Đang đợi UI nhảy sang số trang %d...\n", pageIdx+1)
+
+		err = c.waitPageNumberChange(pageIdx + 1)
+		if err != nil {
+			fmt.Printf("⚠️ Cảnh báo chuyển trang: %v. Có thể dữ liệu chưa kịp load.\n", err)
+		} else {
+			fmt.Println("🆗 Đã nhận diện được trang mới.")
+		}
 	}
 
-	fmt.Printf("📂 Xong! Tổng cộng lấy được %d hóa đơn.\n", len(allInvoices))
+	fmt.Printf("\n📂 HOÀN TẤT TẤT CẢ: Lấy được tổng cộng %d hóa đơn.\n", len(allInvoices))
 	return allInvoices, nil
+}
+
+// selectDateOnCalendar thực hiện chọn ngày trên giao diện Ant Design Calendar
+func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) {
+	parts := strings.Split(dateStr, "/")
+	if len(parts) != 3 {
+		fmt.Printf("⚠️ Định dạng ngày không hợp lệ: %s\n", dateStr)
+		return
+	}
+
+	dayst := strings.TrimLeft(parts[0], "0")
+	monthst := parts[1]
+	yearst := parts[2]
+
+	fmt.Printf("📅 Đang chọn %s cho ô %s...\n", dateStr, selector)
+
+	// Click để mở popup lịch
+	elInput := c.Page.MustElement(selector)
+	elInput.MustClick()
+	time.Sleep(800 * time.Millisecond)
+
+	// --- Vòng lặp chọn Năm ---
+	for {
+		calYear := c.Page.MustElement(".ant-calendar-year-select").MustText()
+		if calYear == yearst {
+			break
+		}
+		if yearst > calYear {
+			c.Page.MustElement(".ant-calendar-next-year-btn").MustClick()
+		} else {
+			c.Page.MustElement(".ant-calendar-prev-year-btn").MustClick()
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	// --- Vòng lặp chọn Tháng ---
+	for {
+		calMonthFull := c.Page.MustElement(".ant-calendar-month-select").MustText()
+		// Làm sạch chuỗi tháng (Xóa "Thg" hoặc "Tháng")
+		calMonth := strings.TrimSpace(strings.ReplaceAll(calMonthFull, "Thg", ""))
+		calMonth = strings.TrimSpace(strings.ReplaceAll(calMonth, "Tháng", ""))
+
+		if calMonth == monthst {
+			break
+		}
+		if monthst > calMonth {
+			c.Page.MustElement(".ant-calendar-next-month-btn").MustClick()
+		} else {
+			c.Page.MustElement(".ant-calendar-prev-month-btn").MustClick()
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	// --- Click chọn đúng Ngày ---
+	cells := c.Page.MustElements(".ant-calendar-table .ant-calendar-cell")
+	for _, cell := range cells {
+		if cell.MustText() == dayst {
+			classPtr := cell.MustAttribute("class")
+			// Đảm bảo không click nhầm vào ngày của tháng trước hoặc tháng sau đang hiển thị mờ
+			if classPtr != nil &&
+				!strings.Contains(*classPtr, "last-month-cell") &&
+				!strings.Contains(*classPtr, "next-month-btn-day") {
+				cell.MustClick()
+				fmt.Printf("✅ Đã chọn ngày %s\n", dayst)
+				break
+			}
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
 }
 func (c *CrawlerService) GrantPermissions() {
 	homeDir, _ := os.UserHomeDir()
@@ -339,6 +402,7 @@ func (c *CrawlerService) CrawlAllPages() {
 	c.IsRunning = true
 	c.TotalInvoices = 0
 	c.CurrentStatus = "Bắt đầu khởi động bot..."
+	c.GrantPermissions()
 
 	// Đảm bảo khi hàm kết thúc (xong hoặc lỗi) thì IsRunning phải về false
 	defer func() {
@@ -553,4 +617,18 @@ func (s *CrawlerService) Logout() error {
 
 	fmt.Println("Hệ thống: Đã đóng trình duyệt Chrome.")
 	return nil
+}
+func (c *CrawlerService) waitPageNumberChange(targetPage int) error {
+	// Sử dụng vòng lặp kiểm tra (Polling) - Cách này cực kỳ ổn định trong Scrapping
+	for i := 0; i < 20; i++ { // Thử 20 lần, mỗi lần 500ms = 10 giây
+		el, err := c.Page.Element("div[class*='PageIndex']")
+		if err == nil {
+			txt := el.MustText() // Ví dụ: "2 / 7"
+			if strings.HasPrefix(strings.TrimSpace(txt), fmt.Sprintf("%d", targetPage)) {
+				return nil // Đã nhảy sang trang mới thành công
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout đợi trang %d hiển thị", targetPage)
 }

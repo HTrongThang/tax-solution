@@ -120,36 +120,35 @@ func (h *Handler) LoginTax(c *gin.Context) {
 	})
 }
 func (h *Handler) GetInvoices(c *gin.Context) {
+	fromDate := c.Query("from")
+	toDate := c.Query("to")
 
-	// 1. Lấy dữ liệu từ URL (Query Params)
-	fromDate := c.Query("from") // .NET gửi: ?from=01/01/2026
-	toDate := c.Query("to")     // .NET gửi: &to=31/01/2026
-
-	// Kiểm tra xem có truyền ngày vào không
 	if fromDate == "" || toDate == "" {
-		c.JSON(http.StatusBadRequest, models.Response{
-			Status:  "error",
-			Message: "Vui lòng cung cấp đầy đủ từ ngày và đến ngày (dd/mm/yyyy)",
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status":  "error",
+			"message": "Thiếu tham số from hoặc to (dd/mm/yyyy)",
 		})
 		return
 	}
 
-	// 2. Gọi Crawler xử lý
+	// Gọi Crawler
 	invoices, err := h.Crawler.SearchAndGetInvoices(fromDate, toDate)
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.Response{
-			Status:  "error",
-			Message: "Lỗi khi tra cứu: " + err.Error(),
+		fmt.Printf("❌ Lỗi cào dữ liệu: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Lỗi hệ thống khi tra cứu hóa đơn: " + err.Error(),
 		})
 		return
 	}
 
-	// 3. Trả kết quả về cho .NET
-	c.JSON(http.StatusOK, models.Response{
-		Status:  "success",
-		Message: fmt.Sprintf("Tìm thấy %d hóa đơn", len(invoices)),
-		Data:    invoices,
+	// Trả về JSON cho .NET hoặc Frontend
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": fmt.Sprintf("Lấy dữ liệu thành công. Tìm thấy %d hóa đơn.", len(invoices)),
+		"total":   len(invoices),
+		"data":    invoices,
 	})
 }
 func (h *Handler) StartCrawl(c *gin.Context) {

@@ -3,20 +3,40 @@
   "WorkspaceRootPath": "D:\\tax-solution\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\components\\crawler_table.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
-      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\components\\crawler_table.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\services\\taxservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\services\\taxservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\views\\userform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\views\\userform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|D:\\tax-solution\\frontend\\views\\userform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\views\\userform.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}|Form"
     },
     {
       "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\js\\crawlertable.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
       "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\js\\crawlertable.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\js\\tax-account-manager.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
-      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\js\\tax-account-manager.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\models\\invoiceresponse.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\models\\invoiceresponse.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\js\\sidebar.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}",
-      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\js\\sidebar.js||{14D17961-FE51-464D-9111-C4AF11D7D99A}"
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\components\\crawler_table.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\components\\crawler_table.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\components\\logout_modal.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\components\\logout_modal.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\components\\settings_content.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\components\\settings_content.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\components\\sidebar.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
+      "RelativeMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|solutionrelative:frontend\\webresources\\user\\components\\sidebar.html||{40D31677-CBC0-4297-A9EF-89D907823A98}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{90CF18BE-437A-4804-9E85-213B3EBFA1C5}|Frontend\\Frontend.csproj|d:\\tax-solution\\frontend\\webresources\\user\\dashboard.html||{40D31677-CBC0-4297-A9EF-89D907823A98}",
@@ -30,72 +50,129 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 4,
+          "SelectedChildIndex": 0,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 3,
-              "Title": "sidebar.js",
-              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\js\\sidebar.js",
-              "RelativeDocumentMoniker": "Frontend\\WebResources\\js\\sidebar.js",
-              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\js\\sidebar.js",
-              "RelativeToolTip": "Frontend\\WebResources\\js\\sidebar.js",
-              "ViewState": "AgIAABgAAAAAAAAAAAAAACsAAABEAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
-              "WhenOpened": "2026-04-13T11:04:09.526Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 2,
-              "Title": "tax-account-manager.js",
-              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\js\\tax-account-manager.js",
-              "RelativeDocumentMoniker": "Frontend\\WebResources\\js\\tax-account-manager.js",
-              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\js\\tax-account-manager.js",
-              "RelativeToolTip": "Frontend\\WebResources\\js\\tax-account-manager.js",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAA6AAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
-              "WhenOpened": "2026-04-13T10:54:33.981Z",
+              "DocumentIndex": 0,
+              "Title": "TaxService.cs",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\Services\\TaxService.cs",
+              "RelativeDocumentMoniker": "Frontend\\Services\\TaxService.cs",
+              "ToolTip": "D:\\tax-solution\\Frontend\\Services\\TaxService.cs",
+              "RelativeToolTip": "Frontend\\Services\\TaxService.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAADUAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-14T02:26:18.119Z",
+              "IsPinned": true,
               "EditorCaption": ""
             },
             {
               "$type": "Document",
               "DocumentIndex": 4,
+              "Title": "InvoiceResponse.cs",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\Models\\InvoiceResponse.cs",
+              "RelativeDocumentMoniker": "Frontend\\Models\\InvoiceResponse.cs",
+              "ToolTip": "D:\\tax-solution\\Frontend\\Models\\InvoiceResponse.cs",
+              "RelativeToolTip": "Frontend\\Models\\InvoiceResponse.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAAwAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-15T08:47:04.448Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "UserForm.cs",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\Views\\UserForm.cs",
+              "RelativeDocumentMoniker": "Frontend\\Views\\UserForm.cs",
+              "ToolTip": "D:\\tax-solution\\Frontend\\Views\\UserForm.cs",
+              "RelativeToolTip": "Frontend\\Views\\UserForm.cs",
+              "ViewState": "AgIAAFUBAAAAAAAAAAAUwF4BAAAZAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-15T08:43:32.679Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "UserForm.cs [Design]",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\Views\\UserForm.cs",
+              "RelativeDocumentMoniker": "Frontend\\Views\\UserForm.cs",
+              "ToolTip": "D:\\tax-solution\\Frontend\\Views\\UserForm.cs [Design]",
+              "RelativeToolTip": "Frontend\\Views\\UserForm.cs [Design]",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-04-15T08:43:30.877Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "logout_modal.html",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\logout_modal.html",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\components\\logout_modal.html",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\logout_modal.html",
+              "RelativeToolTip": "Frontend\\WebResources\\User\\components\\logout_modal.html",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-04-15T08:43:25.011Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
               "Title": "dashboard.html",
               "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\dashboard.html",
               "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\dashboard.html",
               "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\dashboard.html",
               "RelativeToolTip": "Frontend\\WebResources\\User\\dashboard.html",
-              "ViewState": "AgIAAB4AAAAAAAAAAAAAAEEAAAAhAAAAAAAAAA==",
+              "ViewState": "AgIAABgAAAAAAAAAAAAAACIAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
-              "WhenOpened": "2026-04-13T10:50:06.206Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-14T08:39:15.034Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 8,
+              "Title": "sidebar.html",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\sidebar.html",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\components\\sidebar.html",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\sidebar.html",
+              "RelativeToolTip": "Frontend\\WebResources\\User\\components\\sidebar.html",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-04-14T08:40:47.771Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "settings_content.html",
+              "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\settings_content.html",
+              "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\components\\settings_content.html",
+              "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\settings_content.html",
+              "RelativeToolTip": "Frontend\\WebResources\\User\\components\\settings_content.html",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAAgAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
+              "WhenOpened": "2026-04-14T08:40:28.317Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
               "Title": "crawlerTable.js",
               "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\js\\crawlerTable.js",
               "RelativeDocumentMoniker": "Frontend\\WebResources\\js\\crawlerTable.js",
               "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\js\\crawlerTable.js",
               "RelativeToolTip": "Frontend\\WebResources\\js\\crawlerTable.js",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAABgAAAASAAAAAAAAAA==",
+              "ViewState": "AgIAAOIAAAAAAAAAAIAwwPQAAAAiAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001646|",
-              "WhenOpened": "2026-04-13T10:49:15.109Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-14T02:13:28.455Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 5,
               "Title": "crawler_table.html",
               "DocumentMoniker": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\crawler_table.html",
               "RelativeDocumentMoniker": "Frontend\\WebResources\\User\\components\\crawler_table.html",
               "ToolTip": "D:\\tax-solution\\Frontend\\WebResources\\User\\components\\crawler_table.html",
               "RelativeToolTip": "Frontend\\WebResources\\User\\components\\crawler_table.html",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAwAAAAZAAAAAAAAAA==",
+              "ViewState": "AgIAACgAAAAAAAAAAAAWwEIAAAAyAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001512|",
-              "WhenOpened": "2026-04-13T10:32:55.248Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-04-14T08:40:52.536Z"
             }
           ]
         }
