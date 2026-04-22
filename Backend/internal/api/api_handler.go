@@ -3,7 +3,9 @@ package api
 import (
 	"TAXSOLUTION/internal/crawler"
 	"TAXSOLUTION/internal/models"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -124,31 +126,38 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 	toDate := c.Query("to")
 
 	if fromDate == "" || toDate == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"status":  "error",
-			"message": "Thiếu tham số from hoặc to (dd/mm/yyyy)",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Thiếu ngày tháng"})
 		return
 	}
 
-	// Gọi Crawler
-	invoices, err := h.Crawler.SearchAndGetInvoices(fromDate, toDate)
+	// Headers SSE
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-	if err != nil {
-		fmt.Printf("❌ Lỗi cào dữ liệu: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"message": "Lỗi hệ thống khi tra cứu hóa đơn: " + err.Error(),
-		})
-		return
-	}
+	streamChan := make(chan models.StreamData, 5)
+	ctx := c.Request.Context()
 
-	// Trả về JSON cho .NET hoặc Frontend
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "success",
-		"message": fmt.Sprintf("Lấy dữ liệu thành công. Tìm thấy %d hóa đơn.", len(invoices)),
-		"total":   len(invoices),
-		"data":    invoices,
+	go func() {
+		defer close(streamChan)
+		// Gọi crawler (truyền ctx để hỗ trợ ngắt kết nối)
+		_, _ = h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, streamChan)
+	}()
+
+	// Đẩy dữ liệu về Client
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case data, ok := <-streamChan:
+			if !ok {
+				return false
+			}
+			jsonData, _ := json.Marshal(data)
+			fmt.Fprintf(w, "data: %s\n\n", jsonData)
+			return true
+		}
 	})
 }
 func (h *Handler) StartCrawl(c *gin.Context) {

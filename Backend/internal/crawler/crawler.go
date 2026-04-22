@@ -3,12 +3,14 @@ package crawler
 import (
 	"TAXSOLUTION/internal/models"
 	"archive/zip"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -168,145 +170,206 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 	// Nếu hết 7.5 giây mà vẫn thấy trang Login hoặc không thấy nút Logout
 	return fmt.Errorf("TIMEOUT: Hệ thống không phản hồi hoặc sai thông tin đăng nhập")
 }
-func (c *CrawlerService) SearchAndGetInvoices(fromDate, toDate string) ([]models.Invoice, error) {
+func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toDate string, stream chan models.StreamData) ([]models.Invoice, error) {
+	if c.Page == nil {
+		if c.Browser == nil {
+			return nil, fmt.Errorf("browser chưa được khởi tạo")
+		}
+		c.Page = c.Browser.MustPage()
+	}
+
 	var allInvoices []models.Invoice
+	seen := make(map[string]bool)
+	c.IsRunning = true
+	c.TotalInvoices = 0
 
-	// --- 1. ĐIỀU HƯỚNG MENU ---
-	fmt.Println("📍 [STEP 1] Đang mở Menu...")
-	c.Page.MustWaitLoad()
+	c.GrantPermissions()
 
-	// Kiểm tra xem có tìm thấy menu Tra cứu không
-	menuTraCuu := c.Page.MustElementR(".ml-menu-item span", "Tra cứu")
-	fmt.Println("👉 Đã tìm thấy menu 'Tra cứu', đang click...")
-	menuTraCuu.MustClick()
+	if stream != nil {
+		stream <- models.StreamData{Status: "🚀 Đang khởi động bot...", IsDone: false}
+	}
 
-	fmt.Println("👉 Đang tìm link 'Tra cứu hóa đơn'...")
-	linkTraCuu := c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible()
-	linkTraCuu.MustClick()
+	defer func() {
+		c.IsRunning = false
+		if c.CurrentStatus != "Lỗi" && c.CurrentStatus != "Không có kết quả" {
+			c.CurrentStatus = "Hoàn thành"
+		}
+	}()
 
+	// --- 1. ĐIỀU HƯỚNG ---
+	c.CurrentStatus = "Đang mở menu Tra cứu..."
+	if err := c.Page.Context(ctx).Timeout(30 * time.Second).WaitLoad(); err != nil {
+		c.CurrentStatus = "Lỗi"
+		return nil, fmt.Errorf("không thể tải trang: %v", err)
+	}
+
+	c.Page.MustElementR(".ml-menu-item span", "Tra cứu").MustClick()
+	c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible().MustClick()
 	c.Page.MustWaitIdle()
-	fmt.Println("✅ Đã vào trang Tra cứu hóa đơn thành công.")
 
-	// --- 2. ĐIỀN NGÀY VÀ TÌM KIẾM ---
-	fmt.Printf("📍 [STEP 2] Đang điền ngày: %s -> %s\n", fromDate, toDate)
+	// --- 2. TÌM KIẾM ---
 	c.selectDateOnCalendar("#tngay input", fromDate)
 	c.selectDateOnCalendar("#dngay input", toDate)
-
-	fmt.Println("🖱️ Đang nhấn nút Tìm kiếm...")
 	c.Page.MustElement("button.ant-btn-primary[type='submit']").MustClick()
 
-	// --- 3. VÒNG LẶP BÓC TÁCH ---
+	// --- 3. VÒNG LẶP ---
 	maxPages := 1
+	lastFirstInvoiceNo := ""
+	totalOnTax := 0
+	hasSentTotal := false // Biến cờ để chỉ gửi tổng số lượng 1 lần
 
 	for pageIdx := 1; ; pageIdx++ {
-		fmt.Printf("\n--- 📑 ĐANG XỬ LÝ TRANG %d ---\n", pageIdx)
+		if ctx.Err() != nil {
+			return allInvoices, ctx.Err()
+		}
+
+		// A. Đợi và lấy thông tin tổng số kết quả
 		foundData := false
-		var resultText string
-
 		for i := 0; i < 40; i++ {
-			// Sử dụng ElementR để bắt đúng thẻ span có chữ "Có ... kết quả"
 			el, err := c.Page.ElementR("span", `Có\s\d+\skết quả`)
-
 			if err == nil {
-				resultText = el.MustText()
-				if strings.Contains(resultText, "Có 0 kết quả") {
-					fmt.Println("ℹ️ Web báo 0 kết quả. Dừng cào.")
+				txt := el.MustText()
+
+				// Bóc số lượng bằng Regex
+				re := regexp.MustCompile(`\d+`)
+				match := re.FindString(txt)
+				if match != "" {
+					totalOnTax, _ = strconv.Atoi(match)
+				}
+
+				if strings.Contains(txt, "Có 0 kết quả") {
+					c.CurrentStatus = "Không có kết quả"
 					return allInvoices, nil
 				}
-				fmt.Printf("✅ Xác nhận đã có dữ liệu: %s\n", resultText)
+
+				// Gửi tổng số lượng tìm thấy (Chỉ gửi 1 lần duy nhất ở trang 1)
+				if !hasSentTotal && stream != nil && totalOnTax > 0 {
+					stream <- models.StreamData{
+						Status:     fmt.Sprintf("🔎 Hệ thống Thuế báo có tổng cộng %d hóa đơn", totalOnTax),
+						TotalOnTax: totalOnTax,
+						IsDone:     false,
+					}
+					hasSentTotal = true
+				}
+
 				foundData = true
 				break
 			}
-
 			time.Sleep(500 * time.Millisecond)
 		}
-		fmt.Printf("🔍 DEBUG: Đã tìm thấy thẻ, Nội dung là: [%s]\n", resultText)
+		// Gửi trạng thái trang hiện tại
+		if stream != nil {
+			stream <- models.StreamData{
+				Status:      fmt.Sprintf("🔄 Đang xử lý trang %d...", pageIdx),
+				CurrentPage: pageIdx,
+				IsDone:      false,
+			}
+			time.Sleep(700 * time.Millisecond)
+		}
+
 		if !foundData {
-			fmt.Printf("❌ [ERROR] Quá thời gian đợi dữ liệu ở trang %d. Chụp ảnh lỗi...\n", pageIdx)
-			c.Page.MustScreenshot(fmt.Sprintf("error_timeout_page_%d.png", pageIdx))
-			break
+			return allInvoices, fmt.Errorf("timeout đợi dữ liệu trang %d", pageIdx)
 		}
 
 		// B. Cập nhật số trang
-		if pageInfoEl, err := c.Page.Element("div[class*='PageIndex']"); err == nil {
-			infoText := pageInfoEl.MustText()
-			fmt.Printf("📄 Thông tin phân trang: %s\n", infoText)
-			parts := strings.Split(infoText, "/")
-			if len(parts) == 2 {
-				total, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
-				maxPages = total
+		if pageIdx == 1 {
+			if pageInfoEl, err := c.Page.Element("div[class*='PageIndex']"); err == nil {
+				parts := strings.Split(pageInfoEl.MustText(), "/")
+				if len(parts) == 2 {
+					total, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+					maxPages = total
+				}
 			}
 		}
 
-		// C. Bóc dữ liệu Javascript
-		fmt.Println("⚡ Đang bóc dữ liệu bảng bằng Javascript...")
+		// C. Đợi bảng cập nhật (từ trang 2)
+		if pageIdx > 1 {
+			for i := 0; i < 30; i++ {
+				currentNo := c.getFirstInvoiceNoFromUI()
+				if currentNo != "" && currentNo != lastFirstInvoiceNo {
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+
+		// D. BÓC DỮ LIỆU
 		remoteData := c.Page.MustEval(`() => {
             const rows = Array.from(document.querySelectorAll(".ant-table-tbody tr.ant-table-row"));
-            return rows.map(row => {
-                return Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim());
-            });
+            return rows.map(row => Array.from(row.querySelectorAll("td")).map(td => td.innerText.trim()));
         }`).Arr()
-		fmt.Printf("📦 Trang %d có: %d dòng dữ liệu.\n", pageIdx, len(remoteData))
 
-		// --- E. Map dữ liệu vào Struct ---
 		for _, rowRaw := range remoteData {
 			cols := rowRaw.Arr()
-
-			// Kiểm tra nếu hàng có đủ số cột (thead có 18 cột, check >= 14 là an toàn)
-			if len(cols) >= 14 {
-				stt := cols[0].String()
-				if stt == "" || stt == "Không có dữ liệu" {
-					continue
-				}
-
-				allInvoices = append(allInvoices, models.Invoice{
-					STT:         stt,
-					MSTNguoiBan: cols[1].String(),
-					SoHoaDon:    cols[4].String(), // Đúng theo index 4
-					KyHieu:      cols[3].String(), // Ký hiệu hóa đơn
-					NgayLap:     cols[5].String(), // Ngày lập
-					// Bạn có thể chọn lấy Tổng tiền chưa thuế (7) hoặc Tổng thanh toán (11)
-					TongTien:  cols[11].String(),
-					TrangThai: cols[13].String(), // Trạng thái hóa đơn
-				})
+			if len(cols) < 14 {
+				continue
 			}
+
+			uniqueKey := fmt.Sprintf("%s_%s_%s", cols[1].String(), cols[3].String(), cols[4].String())
+			if seen[uniqueKey] {
+				continue
+			}
+			seen[uniqueKey] = true
+
+			inv := models.Invoice{
+				STT:            cols[0].String(),
+				MSTNguoiBan:    cols[1].String(),
+				KyHieuMauSo:    cols[2].String(),
+				KyHieu:         cols[3].String(),
+				SoHoaDon:       cols[4].String(),
+				NgayLap:        cols[5].String(),
+				ThongTinHoaDon: cols[6].String(),
+				TongChuaThue:   cols[7].String(),
+				TongTienThue:   cols[8].String(),
+				TongThanhToan:  cols[11].String(),
+				TrangThai:      cols[13].String(),
+			}
+			allInvoices = append(allInvoices, inv)
+			c.TotalInvoices++
 		}
-		fmt.Printf("✅ Đã lưu trang %d. Tổng tích lũy: %d hóa đơn.\n", pageIdx, len(allInvoices))
+
+		if len(remoteData) > 0 {
+			lastFirstInvoiceNo = remoteData[0].Arr()[4].String()
+		}
 
 		// --- 4. CHUYỂN TRANG ---
 		if pageIdx >= maxPages {
-			fmt.Println("🏁 [FINISH] Đã đạt tới trang cuối cùng.")
 			break
 		}
 
-		iconRight, err := c.Page.Element("i.anticon-right")
+		btnNext, err := c.Page.ElementX("(//button[@type='button'])[10]")
 		if err != nil {
-			// Nếu không thấy nút mà vẫn chưa hết trang, có thể do web đổi giao diện
-			fmt.Println("⚠️ Không tìm thấy nút bấm Next qua icon right.")
 			break
 		}
 
-		// Lấy thẻ button bọc ngoài icon
-		nextBtn := iconRight.MustParent()
+		btnNext.MustClick()
+		time.Sleep(2 * time.Second)
+	}
 
-		nextBtn.MustScrollIntoView()
-
-		// Thực hiện click
-		// nextBtn.MustClick()
-		nextBtn.MustEval(`() => this.click()`)
-
-		fmt.Printf("⏳ Đang đợi UI nhảy sang số trang %d...\n", pageIdx+1)
-
-		err = c.waitPageNumberChange(pageIdx + 1)
-		if err != nil {
-			fmt.Printf("⚠️ Cảnh báo chuyển trang: %v. Có thể dữ liệu chưa kịp load.\n", err)
-		} else {
-			fmt.Println("🆗 Đã nhận diện được trang mới.")
+	// 5. KẾT THÚC
+	if stream != nil {
+		stream <- models.StreamData{
+			Invoices:   allInvoices,
+			Status:     "✅ Hoàn thành tra cứu!",
+			TotalSoFar: c.TotalInvoices,
+			TotalOnTax: totalOnTax,
+			IsDone:     true,
 		}
 	}
 
-	fmt.Printf("\n📂 HOÀN TẤT TẤT CẢ: Lấy được tổng cộng %d hóa đơn.\n", len(allInvoices))
 	return allInvoices, nil
+}
+
+// Hàm bổ trợ lấy Số hóa đơn đầu tiên trên bảng hiện tại
+func (c *CrawlerService) getFirstInvoiceNoFromUI() string {
+	res, err := c.Page.Eval(`() => {
+        const cell = document.querySelector(".ant-table-tbody tr.ant-table-row td:nth-child(5)");
+        return cell ? cell.innerText.trim() : "";
+    }`)
+	if err != nil {
+		return ""
+	}
+	return res.Value.String()
 }
 
 // selectDateOnCalendar thực hiện chọn ngày trên giao diện Ant Design Calendar
@@ -617,18 +680,4 @@ func (s *CrawlerService) Logout() error {
 
 	fmt.Println("Hệ thống: Đã đóng trình duyệt Chrome.")
 	return nil
-}
-func (c *CrawlerService) waitPageNumberChange(targetPage int) error {
-	// Sử dụng vòng lặp kiểm tra (Polling) - Cách này cực kỳ ổn định trong Scrapping
-	for i := 0; i < 20; i++ { // Thử 20 lần, mỗi lần 500ms = 10 giây
-		el, err := c.Page.Element("div[class*='PageIndex']")
-		if err == nil {
-			txt := el.MustText() // Ví dụ: "2 / 7"
-			if strings.HasPrefix(strings.TrimSpace(txt), fmt.Sprintf("%d", targetPage)) {
-				return nil // Đã nhảy sang trang mới thành công
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return fmt.Errorf("timeout đợi trang %d hiển thị", targetPage)
 }
