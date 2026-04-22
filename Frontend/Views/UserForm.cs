@@ -340,37 +340,22 @@ namespace Frontend.Views
                     }
                     break;
                 case "SEARCH_INVOICE":
-                    List<dynamic> invoices = null;
-                    string from = packet.data.fromDate;
-                    string to = packet.data.toDate;
-
                     try
                     {
-                        var result = await _taxService.SearchInvoices(from, to);
+                        string fromDate = packet.data.fromDate;
+                        string toDate = packet.data.toDate;
 
-                         status = result.Status;
-                         message = result.Message;
-                        invoices = result.Invoices; 
+                        if (string.IsNullOrEmpty(fromDate) || string.IsNullOrEmpty(toDate))
+                        {
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync("window.showAlert('Lỗi', 'Dữ liệu ngày tháng không hợp lệ', 'error')");
+                            break;
+                        }
 
-                        if (status == "success")
-                        {
-                            if (invoices != null && invoices.Count > 0)
-                            {
-                                MessageBox.Show($"Tìm thấy {invoices.Count} hóa đơn.", "Thành công");
-                            }
-                            else
-                            {
-                                MessageBox.Show("Không có hóa đơn nào.", "Thông báo");
-                            }
-                        }
-                        else
-                        {
-                            MessageBox.Show(message, "Lỗi");
-                        }
+                        await HandleInvoiceSearchStream(fromDate, toDate);
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show("Lỗi thực thi: " + ex.Message);
+                        System.Diagnostics.Debug.WriteLine("Lỗi SEARCH_INVOICE Case: " + ex.Message);
                     }
                     break;
             }
@@ -439,6 +424,73 @@ namespace Frontend.Views
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("Lỗi nạp cache: " + ex.Message);
+            }
+        }
+        private async Task HandleInvoiceSearchStream(string from, string to)
+        {
+            string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug_log.txt");
+
+            try
+            {
+                // Khởi tạo log
+                File.WriteAllText(logPath, $"--- BẮT ĐẦU: {DateTime.Now} ---\n");
+
+                // Khóa nút trên giao diện Web
+                await webViewUser.CoreWebView2.ExecuteScriptAsync("if(document.getElementById('btn-search')) document.getElementById('btn-search').disabled = true;");
+
+                await _taxService.SearchInvoicesSSE(from, to, (progressData) =>
+                {
+                    // Sử dụng BeginInvoke để cập nhật UI
+                    this.BeginInvoke(new Action(async () =>
+                    {
+                        // 1. Ghi log (Chạy ngầm để không chậm UI)
+                        string logEntry = $"[{DateTime.Now:HH:mm:ss}] {progressData.Status} | Done: {progressData.IsDone}\n";
+                        File.AppendAllText(logPath, logEntry);
+
+                        // 2. Chuyển đổi dữ liệu sang JSON
+                        string jsonStatus = JsonConvert.SerializeObject(progressData, Formatting.None);
+
+                        // 3. Xử lý logic hiển thị
+                        if (progressData.IsDone)
+                        {
+                            // Mở lại nút bấm
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync("if(document.getElementById('btn-search')) document.getElementById('btn-search').disabled = false;");
+
+                            if (progressData.Invoices != null && progressData.Invoices.Count > 0)
+                            {
+                                // Gửi dữ liệu hóa đơn trước
+                                string jsonData = JsonConvert.SerializeObject(progressData.Invoices, Formatting.None);
+                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"renderInvoices({jsonData})");
+
+                                // Cập nhật trạng thái "Hoàn thành" lên UI Web sau khi đã có dữ liệu
+                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.updateCrawlerStatus) window.updateCrawlerStatus({jsonStatus});");
+                                // 2. NẾU LÀ TRẠNG THÁI TRUNG GIAN: Nghỉ một chút để Browser kịp vẽ chữ lên màn hình
+                                if (!progressData.IsDone)
+                                {
+                                    await Task.Delay(200);
+                                }
+                                // Thông báo cuối cùng
+                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Thành công', 'Đã lấy {progressData.Invoices.Count} hóa đơn', 'success')");
+                            }
+                            else
+                            {
+                                // Nếu không có dữ liệu, vẫn phải cập nhật status để tắt Spinner
+                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.updateCrawlerStatus) window.updateCrawlerStatus({jsonStatus});");
+                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Thông báo', 'Không có dữ liệu trả về', 'info')");
+                            }
+                        }
+                        else
+                        {
+                            // Nếu đang trong quá trình chạy (Status: Trang 1, 2...)
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.updateCrawlerStatus) window.updateCrawlerStatus({jsonStatus});");
+                        }
+                    }));
+                });
+            }
+            catch (Exception ex)
+            {
+                File.AppendAllText(logPath, $"LỖI: {ex.Message}\n");
+                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi hệ thống', '{ex.Message}', 'error')");
             }
         }
     }

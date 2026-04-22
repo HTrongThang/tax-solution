@@ -93,21 +93,20 @@
     </div>
 
     <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div class="overflow-x-auto min-h-[450px]">
-            <table class="w-full text-left border-collapse">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse min-w-[1000px]">
                 <thead>
                     <tr class="border-b border-slate-100 bg-slate-50/50">
-                        <th class="py-3 px-6 text-[10px] font-bold uppercase tracking-wider w-[180px]">Mã số thuế</th>
-                        <th class="py-3 px-2 text-[10px] font-bold uppercase tracking-wider">Tên doanh nghiệp</th>
-                        <th class="py-3 px-6 text-[10px] font-bold uppercase tracking-wider w-[160px] text-right">Trạng thái</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 w-12 text-center">STT</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500">Mã số thuế / Ký hiệu</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500">Số hóa đơn / Ngày</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-right">Giá trị thanh toán</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-center">Kiểm tra thuế</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-center">Trạng thái</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 w-10"></th>
                     </tr>
                 </thead>
-                <tbody id="crawler-results-body">
-                    <tr id="empty-row">
-                        <td colspan="3" class="py-32 text-center text-slate-300 italic">
-                            <div class="animate-pulse">📥 Nhấn "Tìm kiếm" để tải dữ liệu hóa đơn...</div>
-                        </td>
-                    </tr>
+                <tbody id="crawler-results-body" class="divide-y divide-slate-50">
                 </tbody>
             </table>
         </div>
@@ -129,5 +128,17 @@
             <button onclick="closeCaptcha()" class="flex-1 py-2 rounded-xl bg-slate-100 text-slate-600 font-bold text-[11px] uppercase hover:bg-slate-200">Hủy</button>
             <button onclick="submitCaptcha()" class="flex-1 py-2 rounded-xl bg-slate-900 text-white font-bold text-[11px] uppercase hover:bg-emerald-600">Xác nhận</button>
         </div>
+    </div>
+</div>
+
+<div id="crawler-status-box"
+     style="display: none !important; position: fixed; top: 100px; left: 50%; transform: translateX(-50%); z-index: 2147483647; width: 350px; pointer-events: none;"
+     class="bg-white p-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-emerald-100 flex items-center gap-4">
+
+    <div id="crawler-spinner" class="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+
+    <div class="flex flex-col min-w-0">
+        <span id="crawler-current-status" class="text-sm font-bold text-slate-800 leading-tight">Đang chuẩn bị...</span>
+        <span id="crawler-sub-detail" class="text-[10px] text-slate-400 mt-1 truncate">Đang kết nối hệ thống thuế...</span>
     </div>
 </div>

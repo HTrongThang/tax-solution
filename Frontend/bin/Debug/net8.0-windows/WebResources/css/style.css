@@ -74,3 +74,19 @@ body {
     .btn-login:hover {
         background-color: #2B6CB0;
     }
+
+#crawler-results-body tr {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

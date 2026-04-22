@@ -4,8 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+
 namespace Frontend.Services
 {
     internal class TaxService
@@ -122,41 +124,46 @@ namespace Frontend.Services
             }
         }
 
-        public async Task<(string Status, string Message, List<dynamic> Invoices)> SearchInvoices(string fromDate, string toDate)
+        public async Task SearchInvoicesSSE(string fromDate, string toDate, Action<StreamData> onProgress)
         {
             try
             {
-                DateTime start = DateTime.Parse(fromDate);
-                DateTime end = DateTime.Parse(toDate);
+                DateTime startDate = DateTime.Parse(fromDate);
+                DateTime endDate = DateTime.Parse(toDate);
 
-                string fDate = start.ToString("dd/MM/yyyy");
-                string tDate = end.ToString("dd/MM/yyyy");
-                // 2. Gọi API GET sang Go với Query Params
-                // URL mẫu: http://localhost:8080/api/tax/searchInvoice?from=01/04/2026&to=13/04/2026
-                var response = await _client.GetAsync($"/api/tax/searchInvoice?from={fDate}&to={tDate}");
-                var content = await response.Content.ReadAsStringAsync();
+                string fDate = startDate.ToString("dd/MM/yyyy");
+                string tDate = endDate.ToString("dd/MM/yyyy");
 
-                // 3. Parse kết quả dùng Newtonsoft.Json
-                dynamic result = JsonConvert.DeserializeObject(content);
-
-                if (response.IsSuccessStatusCode && (result?.status == "success" || result?.Status == "success"))
+                // Sử dụng HttpCompletionOption.ResponseHeadersRead để nhận dữ liệu ngay khi server vừa gửi header
+                using (var response = await _client.GetAsync($"/api/tax/searchInvoice?from={fDate}&to={tDate}", HttpCompletionOption.ResponseHeadersRead))
                 {
-                    // Ép kiểu Data về List<dynamic> để WinForms dễ dùng
-                    var invoiceList = result?.data != null ? result.data.ToObject<List<dynamic>>() : new List<dynamic>();
-                    return ("success", result?.message?.ToString() ?? "Thành công", invoiceList);
-                }
-                else
-                {
-                    return ("error", result?.message?.ToString() ?? "Lỗi tra cứu hóa đơn", null);
+                    using (var stream = await response.Content.ReadAsStreamAsync())
+                    using (var reader = new StreamReader(stream))
+                    {
+                        while (!reader.EndOfStream)
+                        {
+                            string line = await reader.ReadLineAsync();
+
+                            // SSE gửi dữ liệu bắt đầu bằng "data: "
+                            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: ")) continue;
+
+                            string json = line.Substring(6).Trim();
+                            var data = JsonConvert.DeserializeObject<StreamData>(json);
+
+                            if (data != null)
+                            {
+                                onProgress?.Invoke(data); // Gửi về UI
+                            }
+
+                            if (data?.IsDone == true) break;
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("Lỗi SearchInvoices: " + ex.Message);
-                return ("error", "Lỗi kết nối API Tra cứu: " + ex.Message, null);
+                onProgress?.Invoke(new StreamData { Status = "Lỗi kết nối: " + ex.Message, IsDone = true });
             }
-
         }
-
     }
 }

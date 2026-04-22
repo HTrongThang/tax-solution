@@ -255,3 +255,116 @@ window.handleSearchClick = function () {
         window.showAlert('Lỗi', 'Không tìm thấy kết nối ứng dụng (WebView2)!', 'error');
     }
 };
+function renderInvoices(invoices) {
+    const tableBody = document.getElementById('crawler-results-body');
+    tableBody.innerHTML = '';
+
+    if (!invoices || invoices.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="7" class="py-20 text-center text-slate-300 italic">Chưa có dữ liệu để hiển thị</td></tr>`;
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    invoices.forEach((inv) => {
+        const row = document.createElement('tr');
+        row.className = "hover:bg-blue-50/40 transition-all cursor-pointer group";
+
+        row.innerHTML = `
+            <td class="py-4 px-4 text-xs text-slate-400 font-mono text-center">${inv.stt}</td>
+            
+            <td class="py-4 px-4">
+                <div class="flex flex-col">
+                    <span class="text-sm font-semibold text-slate-700">${inv.mst_nguoi_ban}</span>
+                    <span class="text-[10px] text-slate-400 font-medium">${inv.ky_hieu_mau_so} | ${inv.ky_hieu}</span>
+                </div>
+            </td>
+
+            <td class="py-4 px-4">
+                <div class="flex flex-col">
+                    <span class="text-sm font-bold text-blue-600">No. ${inv.so_hoa_don}</span>
+                    <span class="text-[11px] text-slate-500">${inv.ngay_lap}</span>
+                </div>
+            </td>
+
+            <td class="py-4 px-4 text-right">
+                <div class="flex flex-col">
+                    <span class="text-sm font-bold text-slate-800">${inv.tong_thanh_toan}</span>
+                    <span class="text-[10px] text-slate-400">Thuế: ${inv.tong_tien_thue} ${inv.don_vi_tien_te}</span>
+                </div>
+            </td>
+
+            <td class="py-4 px-4 text-center">
+                <div class="flex flex-col items-center gap-1">
+                    <span class="text-[10px] leading-tight font-medium ${inv.ket_qua_kiem_tra.includes('không') ? 'text-red-500' : 'text-slate-500'}">
+                        ${inv.ket_qua_kiem_tra}
+                    </span>
+                    <span class="text-[9px] text-slate-300 italic">${inv.ket_qua_xu_ly}</span>
+                </div>
+            </td>
+
+            <td class="py-4 px-4 text-center">
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-bold ${getStatusStyle(inv.trang_thai)}">
+                    ${inv.trang_thai}
+                </span>
+            </td>
+
+            <td class="py-4 px-4 text-right">
+                <button class="text-slate-300 group-hover:text-blue-500">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                </button>
+            </td>
+        `;
+
+        // Gắn sự kiện xem chi tiết 18 trường (Modal)
+        row.onclick = () => openDetailModal(inv);
+        fragment.appendChild(row);
+    });
+
+    tableBody.appendChild(fragment);
+}
+
+// Hàm bổ trợ màu sắc trạng thái
+function getStatusStyle(status) {
+    const s = status.toLowerCase();
+    if (s.includes("thay thế")) return "bg-orange-50 text-orange-600 ring-1 ring-orange-200";
+    if (s.includes("hủy")) return "bg-red-50 text-red-600 ring-1 ring-red-200";
+    if (s.includes("gốc") || s.includes("mới")) return "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200";
+    return "bg-slate-50 text-slate-500 ring-1 ring-slate-200";
+}
+window.updateCrawlerStatus = function (data) {
+    const statusBox = document.getElementById('crawler-status-box');
+    const statusText = document.getElementById('crawler-current-status');
+    const subDetail = document.getElementById('crawler-sub-detail');
+    const spinner = document.getElementById('crawler-spinner');
+
+    if (!statusBox) return;
+
+    // LẤY DỮ LIỆU
+    const status = data.status || data.Status || "";
+    const isDone = (data.is_done !== undefined) ? data.is_done : data.IsDone;
+    const total = data.total_on_tax || data.TotalOnTax || 0;
+
+    // ÉP HIỂN THỊ
+    statusBox.style.setProperty('display', 'flex', 'important');
+    void statusBox.offsetHeight; // Thủ thuật ép trình duyệt Reflow (vẽ lại ngay lập tức)
+
+    statusText.innerText = status;
+    if (subDetail && total > 0) {
+        subDetail.innerText = `Tìm thấy tổng cộng ${total} hóa đơn.`;
+    }
+
+    if (isDone) {
+        if (spinner) spinner.style.display = 'none';
+        statusText.classList.add('text-emerald-600');
+        statusText.innerText = "✅ " + status;
+
+        // Giữ lại 10 giây để bạn kiểm tra
+        setTimeout(() => {
+            statusBox.style.setProperty('display', 'none', 'important');
+        }, 10000);
+    } else {
+        if (spinner) spinner.style.display = 'block';
+        statusText.classList.remove('text-emerald-600');
+    }
+};
