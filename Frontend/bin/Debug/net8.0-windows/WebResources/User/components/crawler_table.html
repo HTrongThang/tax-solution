@@ -132,16 +132,13 @@
 </div>
 
 <div id="crawler-status-box"
-     style="display: none !important; position: fixed; top: 30px; left: 50%; transform: translateX(-50%); z-index: 100000; min-width: 320px;"
-     class="bg-white p-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.2)] border border-slate-100 flex items-center gap-4">
+     style="display: none !important; position: fixed; top: 100px; left: 50%; transform: translateX(-50%); z-index: 2147483647; width: 350px; pointer-events: none;"
+     class="bg-white p-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-emerald-100 flex items-center gap-4">
 
-    <div id="crawler-spinner" class="relative w-6 h-6 flex-shrink-0">
-        <div class="absolute inset-0 border-2 border-slate-100 rounded-full"></div>
-        <div class="absolute inset-0 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-    </div>
+    <div id="crawler-spinner" class="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
 
-    <div class="flex flex-col overflow-hidden">
-        <span id="crawler-current-status" class="text-[13px] font-bold text-slate-800 leading-tight">Đang chuẩn bị...</span>
-        <span id="crawler-sub-detail" class="text-[10px] text-slate-400 mt-0.5">Vui lòng đợi trong giây lát</span>
+    <div class="flex flex-col min-w-0">
+        <span id="crawler-current-status" class="text-sm font-bold text-slate-800 leading-tight">Đang chuẩn bị...</span>
+        <span id="crawler-sub-detail" class="text-[10px] text-slate-400 mt-1 truncate">Đang kết nối hệ thống thuế...</span>
     </div>
 </div>
