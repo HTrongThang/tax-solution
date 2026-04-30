@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Windows.Forms;
 using System.Xml;
 using Newtonsoft.Json;
@@ -19,9 +20,12 @@ namespace Frontend.Views
     public partial class UserForm : Form
     {
         private readonly TaxService _taxService = new TaxService();
+        private CancellationTokenSource _searchCts;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
         private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
         private readonly string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
+        // Semaphore để tuần tự hóa các lệnh ExecuteScriptAsync tới WebView2
+        private readonly SemaphoreSlim _webviewSemaphore = new SemaphoreSlim(1, 1);
         public UserForm()
         {
             InitializeComponent();
@@ -351,12 +355,49 @@ namespace Frontend.Views
                             break;
                         }
 
-                        await HandleInvoiceSearchStream(fromDate, toDate);
+                        // Cancel any previous search
+                        _searchCts?.Cancel();
+                        _searchCts = new CancellationTokenSource();
+
+                        // Start new search with cancellation support
+                        _ = HandleInvoiceSearchStream(fromDate, toDate, _searchCts.Token);
                     }
                     catch (Exception ex)
                     {
                         System.Diagnostics.Debug.WriteLine("Lỗi SEARCH_INVOICE Case: " + ex.Message);
                     }
+                    break;
+                case "CANCEL_SEARCH":
+                    try
+                    {
+                        _searchCts?.Cancel();
+                    }
+                    catch { }
+                    break;
+                case "REQUEST_PAGE":
+                    try
+                    {
+                        int page = packet.data.page;
+                        int pageSize = packet.data.pageSize;
+                        // Call backend API to get specific page (implement if supported by backend)
+                        // For now we forward to Go service via TaxService if implemented
+                        _ = Task.Run(async () => {
+                            try
+                            {
+                                var pageResult = await _taxService.GetInvoicesPageAsync(page, pageSize);
+                                if (pageResult != null)
+                                {
+                                    string js = $"renderInvoices({JsonConvert.SerializeObject(pageResult)});";
+                                    await ExecuteScriptSerializedAsync(js);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine("REQUEST_PAGE error: " + ex.Message);
+                            }
+                        });
+                    }
+                    catch { }
                     break;
             }
         }
@@ -368,7 +409,7 @@ namespace Frontend.Views
                 {
                     string jsonData = File.ReadAllText(filePath);
                     string safeJson = JsonConvert.ToString(jsonData);
-                    await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.loadInitialData({safeJson})");
+                    await ExecuteScriptSerializedAsync($"window.loadInitialData({safeJson})");
                 }
             }
             catch (Exception ex)
@@ -408,6 +449,29 @@ namespace Frontend.Views
         }})();";
 
                 _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsCommand);
+                // Ensure serialization
+                _ = ExecuteScriptSerializedAsync(jsCommand);
+            }
+        }
+
+        // Helper: Ensure ExecuteScriptAsync calls are serialized to avoid concurrent execution issues
+        private async Task ExecuteScriptSerializedAsync(string script)
+        {
+            try
+            {
+                await _webviewSemaphore.WaitAsync();
+                if (webViewUser?.CoreWebView2 != null)
+                {
+                    await webViewUser.CoreWebView2.ExecuteScriptAsync(script);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("ExecuteScriptSerializedAsync error: " + ex.Message);
+            }
+            finally
+            {
+                _webviewSemaphore.Release();
             }
         }
         private void LoadCompaniesToRAM()
@@ -426,7 +490,7 @@ namespace Frontend.Views
                 System.Diagnostics.Debug.WriteLine("Lỗi nạp cache: " + ex.Message);
             }
         }
-        private async Task HandleInvoiceSearchStream(string from, string to)
+        private async Task HandleInvoiceSearchStream(string from, string to, CancellationToken cancellationToken = default)
         {
             string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug_log.txt");
 
@@ -440,52 +504,64 @@ namespace Frontend.Views
 
                 await _taxService.SearchInvoicesSSE(from, to, (progressData) =>
                 {
-                    // Sử dụng BeginInvoke để cập nhật UI
-                    this.BeginInvoke(new Action(async () =>
+                    // Marshal to UI thread and run async work safely
+                    this.BeginInvoke((Action)(() =>
                     {
-                        // 1. Ghi log (Chạy ngầm để không chậm UI)
-                        string logEntry = $"[{DateTime.Now:HH:mm:ss}] {progressData.Status} | Done: {progressData.IsDone}\n";
-                        File.AppendAllText(logPath, logEntry);
-
-                        // 2. Chuyển đổi dữ liệu sang JSON
-                        string jsonStatus = JsonConvert.SerializeObject(progressData, Formatting.None);
-
-                        // 3. Xử lý logic hiển thị
-                        if (progressData.IsDone)
+                        _ = Task.Run(async () =>
                         {
-                            // Mở lại nút bấm
-                            await webViewUser.CoreWebView2.ExecuteScriptAsync("if(document.getElementById('btn-search')) document.getElementById('btn-search').disabled = false;");
-
-                            if (progressData.Invoices != null && progressData.Invoices.Count > 0)
+                            try
                             {
-                                // Gửi dữ liệu hóa đơn trước
-                                string jsonData = JsonConvert.SerializeObject(progressData.Invoices, Formatting.None);
-                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"renderInvoices({jsonData})");
+                                // 1. Ghi log (Chạy ngầm để không chậm UI)
+                                string logEntry = $"[{DateTime.Now:HH:mm:ss}] {progressData.Status} | Done: {progressData.IsDone}\n";
+                                File.AppendAllText(logPath, logEntry);
 
-                                // Cập nhật trạng thái "Hoàn thành" lên UI Web sau khi đã có dữ liệu
-                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.updateCrawlerStatus) window.updateCrawlerStatus({jsonStatus});");
-                                // 2. NẾU LÀ TRẠNG THÁI TRUNG GIAN: Nghỉ một chút để Browser kịp vẽ chữ lên màn hình
-                                if (!progressData.IsDone)
+                                // 2. Chuyển đổi dữ liệu sang JSON
+                                string jsonStatus = JsonConvert.SerializeObject(progressData, Formatting.None);
+
+                                // 3. Xử lý logic hiển thị
+                                // Send progress via PostWebMessageAsJson to reduce ExecuteScript calls
+                                try
                                 {
-                                    await Task.Delay(200);
+                                    var wrapper = new { action = "sse_progress", data = progressData };
+                                    var wrapperJson = JsonConvert.SerializeObject(wrapper);
+                                    // Post message on UI thread
+                                    this.BeginInvoke((Action)(() =>
+                                    {
+                                        try
+                                        {
+                                            webViewUser.CoreWebView2.PostWebMessageAsJson(wrapperJson);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            File.AppendAllText(logPath, $"POST MESSAGE ERROR: {ex.Message}\n");
+                                        }
+                                    }));
+                                    // Fallback: if final chunk contains invoices, also call renderInvoices via ExecuteScript to ensure UI update
+                                    if (progressData.IsDone && progressData.Invoices != null && progressData.Invoices.Count > 0)
+                                    {
+                                        try
+                                        {
+                                            string jsonData = JsonConvert.SerializeObject(progressData.Invoices, Formatting.None);
+                                            await ExecuteScriptSerializedAsync($"renderInvoices({jsonData})");
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            File.AppendAllText(logPath, $"FALLBACK RENDER ERROR: {ex.Message}\n");
+                                        }
+                                    }
                                 }
-                                // Thông báo cuối cùng
-                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Thành công', 'Đã lấy {progressData.Invoices.Count} hóa đơn', 'success')");
+                                catch (Exception ex)
+                                {
+                                    File.AppendAllText(logPath, $"SERIALIZE ERROR: {ex.Message}\n");
+                                }
                             }
-                            else
+                            catch (Exception ex)
                             {
-                                // Nếu không có dữ liệu, vẫn phải cập nhật status để tắt Spinner
-                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.updateCrawlerStatus) window.updateCrawlerStatus({jsonStatus});");
-                                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Thông báo', 'Không có dữ liệu trả về', 'info')");
+                                File.AppendAllText(logPath, $"HANDLER ERROR: {ex.Message}\n");
                             }
-                        }
-                        else
-                        {
-                            // Nếu đang trong quá trình chạy (Status: Trang 1, 2...)
-                            await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.updateCrawlerStatus) window.updateCrawlerStatus({jsonStatus});");
-                        }
+                        });
                     }));
-                });
+                }, cancellationToken);
             }
             catch (Exception ex)
             {

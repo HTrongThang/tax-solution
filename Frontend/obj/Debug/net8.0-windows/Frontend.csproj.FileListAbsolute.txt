@@ -91,3 +91,6 @@ D:\tax-solution\Frontend\obj\Debug\net8.0-windows\Frontend.genruntimeconfig.cach
 D:\tax-solution\Frontend\obj\Debug\net8.0-windows\ref\Frontend.dll
 D:\tax-solution\Frontend\bin\Debug\net8.0-windows\Newtonsoft.Json.dll
 D:\tax-solution\Frontend\bin\Debug\net8.0-windows\WebResources\js\crawlerTable.js
+D:\2.Company\TaxSolution\Frontend\bin\Debug\net8.0-windows\WebResources\js\crawlerTable.js
+D:\2.Company\TaxSolution\Frontend\bin\Debug\net8.0-windows\Newtonsoft.Json.dll
+D:\2.Company\TaxSolution\Frontend\obj\Debug\net8.0-windows\Frontend.sourcelink.json

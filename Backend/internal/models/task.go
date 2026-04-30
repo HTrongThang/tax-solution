@@ -15,7 +15,7 @@ type Invoice struct {
 	STT              string `json:"stt"`                 // Cột 0
 	MSTNguoiBan      string `json:"mst_nguoi_ban"`       // Cột 1
 	KyHieuMauSo      string `json:"ky_hieu_mau_so"`      // Cột 2
-	KyHieu           string `json:"ky_hieu"`             // Cột 3 (Ký hiệu hóa đơn)
+	KyHieu           string `json:"ky_hieu"`             // Cột 3
 	SoHoaDon         string `json:"so_hoa_don"`          // Cột 4
 	NgayLap          string `json:"ngay_lap"`            // Cột 5
 	ThongTinHoaDon   string `json:"thong_tin_hoa_don"`   // Cột 6

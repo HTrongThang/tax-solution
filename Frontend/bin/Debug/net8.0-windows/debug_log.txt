@@ -1,5 +1,7 @@
---- BẮT ĐẦU: 24/04/2026 9:19:41 AM ---
-[09:19:47] 🚀 Đang khởi động bot... | Done: False
-[09:19:47] 🔎 Hệ thống Thuế báo có tổng cộng 12 hóa đơn | Done: False
-[09:19:47] 🔄 Đang xử lý trang 1... | Done: False
-[09:19:47] ✅ Hoàn thành tra cứu! | Done: True
+--- BẮT ĐẦU: 30/04/2026 10:02:02 CH ---
+[22:02:02] 🚀 Đang khởi động bot... | Done: False
+[22:02:06] 🔄 Đang xử lý trang 1... | Done: False
+HANDLER ERROR: The process cannot access the file 'D:\2.Company\TaxSolution\Frontend\bin\Debug\net8.0-windows\debug_log.txt' because it is being used by another process.
+[22:02:08] 🔄 Đang xử lý trang 2... | Done: False
+[22:02:10] 🔄 Đang xử lý trang 3... | Done: False
+[22:02:10] ✅ Hoàn thành tra cứu! | Done: True

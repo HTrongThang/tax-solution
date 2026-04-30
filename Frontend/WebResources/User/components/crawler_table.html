@@ -45,20 +45,21 @@
                     </select>
                 </div>
                 <div class="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
-                    <input type="date"
+                    <!-- hidden native ISO date inputs for reliable parsing -->
+                    <input type="date" id="date-from-iso" value="2026-04-01" max="2026-04-15" class="hidden">
+                    <input type="text"
                            id="date-from"
-                           value="2026-04-01"
-                           max="2026-04-15"
-                           onfocus="this.showPicker()"
+                           value="01/01/2026"
+                           placeholder="dd/mm/yyyy"
                            class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
 
                     <span class="text-slate-300">→</span>
 
-                    <input type="date"
+                    <input type="date" id="date-to-iso" value="2026-04-13" max="2026-04-15" class="hidden">
+                    <input type="text"
                            id="date-to"
-                           value="2026-04-13"
-                           max="2026-04-15"
-                           onfocus="this.showPicker()"
+                           value="07/01/2026"
+                           placeholder="dd/mm/yyyy"
                            class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
                 </div>
             </div>
@@ -109,6 +110,10 @@
                 <tbody id="crawler-results-body" class="divide-y divide-slate-50">
                 </tbody>
             </table>
+        </div>
+        <div class="px-4 py-3 bg-white/80 border-t border-slate-100 flex items-center justify-between">
+            <div id="crawler-pagination-info" class="text-[12px] text-slate-500"></div>
+            <div id="crawler-pagination" class="text-sm flex items-center gap-2"></div>
         </div>
     </div>
 </div>

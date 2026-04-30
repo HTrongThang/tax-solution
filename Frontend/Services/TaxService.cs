@@ -2,7 +2,9 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Text;
@@ -12,14 +14,13 @@ namespace Frontend.Services
 {
     internal class TaxService
     {
-            private readonly HttpClient _client = new HttpClient
-            {
-                BaseAddress = new Uri("http://localhost:8080")
-                ,
-                Timeout = System.Threading.Timeout.InfiniteTimeSpan
-            };
+        private readonly HttpClient _client = new HttpClient
+        {
+            BaseAddress = new Uri("http://localhost:8080"),
+            Timeout = System.Threading.Timeout.InfiniteTimeSpan
+        };
 
-            public async Task<string> Init() => await _client.GetStringAsync("/api/tax/init");
+        public async Task<string> Init() => await _client.GetStringAsync("/api/tax/init");
 
         public async Task<string> GetCaptchaBase64()
         {
@@ -93,21 +94,14 @@ namespace Frontend.Services
         {
             try
             {
-                // 1. Khởi tạo client (Nếu Thắng đã có HttpClient dùng chung thì dùng luôn)
                 using (var client = new HttpClient())
                 {
-                    // Thiết lập Timeout để tránh treo app nếu Go bị lỗi
                     client.Timeout = TimeSpan.FromSeconds(10);
-
-                    // 2. Gọi API POST tới Go (Nhớ kiểm tra đúng Port của Go)
                     var response = await client.PostAsync("http://localhost:8080/api/tax/logout", null);
-
-                    // 3. Đọc nội dung trả về
                     var content = await response.Content.ReadAsStringAsync();
 
                     if (response.IsSuccessStatusCode)
                     {
-                        // Parse JSON bằng Newtonsoft.Json
                         dynamic result = JsonConvert.DeserializeObject(content);
                         return (result.status.ToString(), result.message.ToString());
                     }
@@ -119,13 +113,31 @@ namespace Frontend.Services
             }
             catch (Exception ex)
             {
-                // Bẫy lỗi nếu Go chưa chạy hoặc lỗi mạng
                 return ("error", "Không thể kết nối tới Backend Go: " + ex.Message);
             }
         }
 
-        public async Task SearchInvoicesSSE(string fromDate, string toDate, Action<StreamData> onProgress)
+        // Optional: fetch specific page (backend must support this endpoint)
+        public async Task<List<dynamic>> GetInvoicesPageAsync(int page, int pageSize)
         {
+            try
+            {
+                var response = await _client.GetAsync($"/api/tax/invoices?page={page}&pageSize={pageSize}");
+                response.EnsureSuccessStatusCode();
+                var body = await response.Content.ReadAsStringAsync();
+                var data = JsonConvert.DeserializeObject<List<dynamic>>(body);
+                return data;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("GetInvoicesPageAsync error: " + ex.Message);
+                return null;
+            }
+        }
+
+        public async Task SearchInvoicesSSE(string fromDate, string toDate, Action<StreamData> onProgress, System.Threading.CancellationToken cancellationToken = default)
+        {
+            // Improved SSE reader with cancellation support and better logging
             try
             {
                 DateTime startDate = DateTime.Parse(fromDate);
@@ -134,35 +146,95 @@ namespace Frontend.Services
                 string fDate = startDate.ToString("dd/MM/yyyy");
                 string tDate = endDate.ToString("dd/MM/yyyy");
 
-                // Sử dụng HttpCompletionOption.ResponseHeadersRead để nhận dữ liệu ngay khi server vừa gửi header
-                using (var response = await _client.GetAsync($"/api/tax/searchInvoice?from={fDate}&to={tDate}", HttpCompletionOption.ResponseHeadersRead))
+                var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}";
+                using (var response = await _client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
                 {
+                    response.EnsureSuccessStatusCode();
+
                     using (var stream = await response.Content.ReadAsStreamAsync())
                     using (var reader = new StreamReader(stream))
                     {
-                        while (!reader.EndOfStream)
+                        var sb = new System.Text.StringBuilder();
+                        while (true)
                         {
-                            string line = await reader.ReadLineAsync();
-
-                            // SSE gửi dữ liệu bắt đầu bằng "data: "
-                            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: ")) continue;
-
-                            string json = line.Substring(6).Trim();
-                            var data = JsonConvert.DeserializeObject<StreamData>(json);
-
-                            if (data != null)
+                            if (cancellationToken.IsCancellationRequested)
                             {
-                                onProgress?.Invoke(data); // Gửi về UI
+                                onProgress?.Invoke(new StreamData { Status = "Đã hủy bởi người dùng", IsDone = true });
+                                break;
+                            }
+                            var line = await reader.ReadLineAsync();
+                            if (line == null)
+                            {
+                                if (sb.Length > 0)
+                                {
+                                    try
+                                    {
+                                        var json = sb.ToString();
+                                        var data = JsonConvert.DeserializeObject<StreamData>(json);
+                                        if (data != null) onProgress?.Invoke(data);
+                                        if (data?.IsDone == true) break;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine("SSE final chunk parse failed: " + ex.Message + " payload:" + sb.ToString());
+                                    }
+                                }
+                                break;
                             }
 
-                            if (data?.IsDone == true) break;
+                            var trimmed = line.TrimEnd('\r');
+
+                            if (string.IsNullOrWhiteSpace(trimmed))
+                            {
+                                if (sb.Length > 0)
+                                {
+                                    try
+                                    {
+                                        var json = sb.ToString();
+                                        var data = JsonConvert.DeserializeObject<StreamData>(json);
+                                        if (data != null)
+                                        {
+                                            onProgress?.Invoke(data);
+                                            if (data.IsDone) break;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine("Parse SSE event failed: " + ex.Message + " payload:" + sb.ToString());
+                                    }
+                                    sb.Clear();
+                                }
+                                if (cancellationToken.IsCancellationRequested)
+                                {
+                                    onProgress?.Invoke(new StreamData { Status = "Đã hủy bởi người dùng", IsDone = true });
+                                    break;
+                                }
+                                continue;
+                            }
+
+                            if (trimmed.StartsWith("data:"))
+                            {
+                                var payload = trimmed.Substring(5);
+                                if (payload.StartsWith(" ")) payload = payload.Substring(1);
+                                if (sb.Length > 0) sb.Append('\n');
+                                sb.Append(payload);
+                            }
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                onProgress?.Invoke(new StreamData { Status = "Lỗi kết nối: " + ex.Message, IsDone = true });
+                if (ex is OperationCanceledException)
+                {
+                    System.Diagnostics.Debug.WriteLine("SearchInvoicesSSE canceled");
+                    onProgress?.Invoke(new StreamData { Status = "Đã hủy", IsDone = true });
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine("SearchInvoicesSSE error: " + ex.Message);
+                    onProgress?.Invoke(new StreamData { Status = "Lỗi kết nối: " + ex.Message, IsDone = true });
+                }
             }
         }
     }

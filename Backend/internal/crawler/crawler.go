@@ -245,7 +245,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 				// Gửi tổng số lượng tìm thấy (Chỉ gửi 1 lần duy nhất ở trang 1)
 				if !hasSentTotal && stream != nil && totalOnTax > 0 {
 					stream <- models.StreamData{
-						Status:     fmt.Sprintf("🔎 Hệ thống Thuế báo có tổng cộng %d hóa đơn", totalOnTax),
+						Status:     fmt.Sprintf("🔎 Tìm thấy tổng cộng %d hóa đơn", totalOnTax),
 						TotalOnTax: totalOnTax,
 						IsDone:     false,
 					}
@@ -264,7 +264,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 				CurrentPage: pageIdx,
 				IsDone:      false,
 			}
-			time.Sleep(700 * time.Millisecond)
+			// time.Sleep(700 * time.Millisecond)
 		}
 
 		if !foundData {
@@ -289,7 +289,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 				if currentNo != "" && currentNo != lastFirstInvoiceNo {
 					break
 				}
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(300 * time.Millisecond)
 			}
 		}
 
@@ -312,17 +312,24 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 			seen[uniqueKey] = true
 
 			inv := models.Invoice{
-				STT:            cols[0].String(),
-				MSTNguoiBan:    cols[1].String(),
-				KyHieuMauSo:    cols[2].String(),
-				KyHieu:         cols[3].String(),
-				SoHoaDon:       cols[4].String(),
-				NgayLap:        cols[5].String(),
-				ThongTinHoaDon: cols[6].String(),
-				TongChuaThue:   cols[7].String(),
-				TongTienThue:   cols[8].String(),
-				TongThanhToan:  cols[11].String(),
-				TrangThai:      cols[13].String(),
+				STT:              cols[0].String(),
+				MSTNguoiBan:      cols[1].String(),
+				KyHieuMauSo:      cols[2].String(),
+				KyHieu:           cols[3].String(),
+				SoHoaDon:         cols[4].String(),
+				NgayLap:          cols[5].String(),
+				ThongTinHoaDon:   cols[6].String(),
+				TongChuaThue:     cols[7].String(),
+				TongTienThue:     cols[8].String(),
+				ChietKhau:        cols[9].String(),
+				TongPhi:          cols[10].String(),
+				TongThanhToan:    cols[11].String(),
+				DonViTienTe:      cols[12].String(),
+				TrangThai:        cols[13].String(),
+				KetQuaXuLy:       cols[14].String(), // Chỉnh lại cho đúng thứ tự
+				KetQuaKiemTra:    cols[15].String(), // Chỉnh lại cho đúng thứ tự
+				HoaDonLienQuan:   cols[16].String(), // Thêm cho đủ cột 16
+				ThongTinLienQuan: cols[17].String(), // Thêm cho đủ cột 17
 			}
 			allInvoices = append(allInvoices, inv)
 			c.TotalInvoices++
