@@ -1,7 +1,7 @@
---- BẮT ĐẦU: 30/04/2026 10:02:02 CH ---
-[22:02:02] 🚀 Đang khởi động bot... | Done: False
-[22:02:06] 🔄 Đang xử lý trang 1... | Done: False
+--- BẮT ĐẦU: 01/05/2026 11:08:16 CH ---
+[23:08:16] 🚀 Đang khởi động bot... | Done: False
+[23:08:20] 🔎 Tìm thấy tổng cộng 40 hóa đơn | Done: False
 HANDLER ERROR: The process cannot access the file 'D:\2.Company\TaxSolution\Frontend\bin\Debug\net8.0-windows\debug_log.txt' because it is being used by another process.
-[22:02:08] 🔄 Đang xử lý trang 2... | Done: False
-[22:02:10] 🔄 Đang xử lý trang 3... | Done: False
-[22:02:10] ✅ Hoàn thành tra cứu! | Done: True
+[23:08:22] 🔄 Đang xử lý trang 2... | Done: False
+[23:08:25] 🔄 Đang xử lý trang 3... | Done: False
+[23:08:25] ✅ Hoàn thành tra cứu! | Done: True

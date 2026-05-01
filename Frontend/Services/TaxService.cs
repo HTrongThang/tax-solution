@@ -237,5 +237,32 @@ namespace Frontend.Services
                 }
             }
         }
+        public async Task<(string Status, string Message)> StartCrawlAsync(string path)
+        {
+            try
+            {
+                // Gửi đường dẫn lưu file hoặc tham số cấu hình xuống Go
+                var payload = new { path = path };
+
+                // Gọi đến endpoint /api/tax/start-crawl mà mình vừa thiết lập ở Go
+                var response = await _client.PostAsJsonAsync("/api/tax/start-crawl", payload);
+
+                var content = await response.Content.ReadAsStringAsync();
+                dynamic result = JsonConvert.DeserializeObject(content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return (result?.status?.ToString() ?? "success", result?.message?.ToString() ?? "Đã bắt đầu tiến trình");
+                }
+                else
+                {
+                    return ("error", result?.message?.ToString() ?? "Server từ chối yêu cầu");
+                }
+            }
+            catch (Exception ex)
+            {
+                return ("error", $"Lỗi kết nối khi gọi StartCrawl: {ex.Message}");
+            }
+        }
     }
 }

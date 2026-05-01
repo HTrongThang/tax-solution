@@ -1,5 +1,5 @@
 // Hàm vẽ danh sách công ty vào Dropdown
-window.renderCompanyDropdown = function () {
+window.renderCompanyDropdown = function() {
     const selectCompany = document.getElementById('select-company');
     if (!selectCompany) return;
 
@@ -21,15 +21,72 @@ window.renderCompanyDropdown = function () {
 };
 
 // Receive messages from host (C#) via PostWebMessageAsJson
-if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.addEventListener('message', function (e) {
+// Centralized listener: also supports per-request callbacks via window._pendingWebviewRequests
+window._pendingWebviewRequests = window._pendingWebviewRequests || {};
+if (window.chrome?.webview) {
+    window.chrome.webview.addEventListener('message', function(e) {
         try {
             const payload = (typeof e.data === 'string') ? JSON.parse(e.data) : e.data;
             if (!payload) return;
-            if (payload.action === 'sse_progress') {
-                // Delegate to centralized handler
-                if (window.handleSseProgress) window.handleSseProgress(payload.data || payload.Data || payload);
+
+            // If there's a pending per-request handler, invoke it and return.
+            // NOTE: Do NOT auto-delete the handler here. The handler (creator) sets a timeout and is
+            // responsible for clearing it and deleting its entry when it decides the request is complete.
+            if (payload.requestId && window._pendingWebviewRequests[payload.requestId]) {
+                try {
+                    const h = window._pendingWebviewRequests[payload.requestId];
+                    // call handler; let it manage completion and cleanup
+                    try { h(payload); } catch (ex2) { console.error('pending handler threw', ex2); }
+                } catch (ex) {
+                    console.error('pending request handler lookup error', ex);
+                }
+                return;
             }
+
+            // Request-level messages
+            if (payload.action === "START_CRAWL_ACK") {
+                console.log('START_CRAWL_ACK', payload);
+                // If no per-request handler is waiting, give minimal UI feedback
+                if (!payload.requestId || !window._pendingWebviewRequests[payload.requestId]) {
+                    const statusLabel = document.getElementById('status-text');
+                    if (statusLabel) statusLabel.innerText = 'Đã gửi tác vụ, đang chạy...';
+                }
+                return;
+            }
+
+            if (payload.action === "CRAWL_ERROR") {
+                const msg = payload.message || payload.Message || 'Lỗi không xác định';
+                console.error('CRAWL_ERROR', payload);
+                if (payload.requestId && window._pendingWebviewRequests[payload.requestId]) {
+                    // let the per-request handler deal with this error (it will clean itself up)
+                } else {
+                    // general fallback: show alert and restore UI
+                    try { window.showAlert?.('Lỗi', msg, 'error'); } catch (e) { console.error(e); }
+                    if (window.finalizeSearchUI) window.finalizeSearchUI();
+                }
+                return;
+            }
+
+            // Backwards-compatible SSE progress handling
+            if (payload.action === 'sse_progress') {
+                if (window.handleSseProgress) window.handleSseProgress(payload.data || payload.Data || payload);
+                return;
+            }
+
+            // Generic action handlers
+            if (payload.action === "CRAWL_STATUS_UPDATE") {
+                const statusLabel = document.getElementById('status-text');
+                if (statusLabel) statusLabel.innerText = "Trạng thái: " + (payload.status || payload.Status || '');
+                return;
+            }
+
+            if (payload.action === "CRAWL_FINISHED") {
+                try { alert("Đã cào xong hóa đơn!"); } catch { }
+                if (window.finalizeSearchUI) window.finalizeSearchUI();
+                return;
+            }
+
+            // Other non-request messages can be handled here as needed
         } catch (err) {
             console.error('webview message handler error', err);
         }
@@ -37,7 +94,7 @@ if (window.chrome && window.chrome.webview) {
 }
 
 // Centralized SSE progress handler so logic is in one place and reusable
-window.handleSseProgress = function (data) {
+window.handleSseProgress = function(data) {
     if (!data) return;
 
     // Update status box
@@ -79,7 +136,7 @@ window.handleSseProgress = function (data) {
 };
 
 // Restore UI when search completes or watchdog triggers
-window.finalizeSearchUI = function () {
+window.finalizeSearchUI = function() {
     try {
         // enable search button
         const btn = document.getElementById('btn-search');
@@ -105,7 +162,7 @@ window.finalizeSearchUI = function () {
 
 // Unified pagination handler. If invoices array provided, use client-side paging and cache.
 // Otherwise render empty pagination using totalItems and request pages from host on click.
-window.handlePagination = function ({ invoices = null, totalItems = 0, currentPage = 1, pageSize = 20 }) {
+window.handlePagination = function({ invoices = null, totalItems = 0, currentPage = 1, pageSize = 20 }) {
     if (Array.isArray(invoices) && invoices.length) {
         // cache and show first page (or requested page)
         paginateClient(invoices, pageSize);
@@ -116,7 +173,7 @@ window.handlePagination = function ({ invoices = null, totalItems = 0, currentPa
     }
 };
 // Hàm 1: Trung gian - Gọi khi bấm nút
-window.handleLoginClick = function (btn) {
+window.handleLoginClick = function(btn) {
     // Hiệu ứng loading để người dùng không bấm lung tung
     const originalText = btn.innerText;
     btn.innerText = "Đang kết nối...";
@@ -137,13 +194,13 @@ window.handleLoginClick = function (btn) {
 };
 
 // Hủy tìm kiếm - gửi lệnh tới C#
-window.handleCancelClick = function () {
+window.handleCancelClick = function() {
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({ action: 'CANCEL_SEARCH' });
     }
 };
 // Hàm 2: Chỉ làm nhiệm vụ hiển thị (C# sẽ gọi hàm này)
-window.openCaptcha = function (captchaBase64) {
+window.openCaptcha = function(captchaBase64) {
     const modal = document.getElementById('captcha-modal');
     const img = document.getElementById('img-captcha');
     const input = document.getElementById('input-captcha');
@@ -162,12 +219,12 @@ window.openCaptcha = function (captchaBase64) {
 };
 
 // Hàm đóng Popup
-window.closeCaptcha = function () {
+window.closeCaptcha = function() {
     document.getElementById('captcha-modal').classList.add('hidden');
     document.getElementById('input-captcha').value = '';
 };
 
-window.handleLogout = function () {
+window.handleLogout = function() {
     // Báo cho C# biết là Thắng muốn Logout
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({
@@ -176,7 +233,7 @@ window.handleLogout = function () {
     }
 };
 
-window.submitCaptcha = function () {
+window.submitCaptcha = function() {
     const inputCaptcha = document.getElementById('input-captcha');
     const selectCompany = document.getElementById('select-company');
 
@@ -206,7 +263,7 @@ window.submitCaptcha = function () {
     if (inputCaptcha) inputCaptcha.disabled = true;
 };
 
-window.updateLoginStatus = function (isLoggedIn) {
+window.updateLoginStatus = function(isLoggedIn) {
     const btn = document.getElementById('btn-auth');
     if (!btn) return;
 
@@ -228,7 +285,7 @@ window.updateLoginStatus = function (isLoggedIn) {
 };
 
 // Hàm trung gian điều hướng sự kiện
-window.handleAuthAction = function (btn) {
+window.handleAuthAction = function(btn) {
     if (btn.dataset.state === "logged-in") {
         return handleLogoutClick(); // Gọi hàm Logout của bạn
     }
@@ -238,7 +295,7 @@ window.handleAuthAction = function (btn) {
 
     handleLoginClick(btn); // Gửi sang C#
 };
-window.handleLogoutClick = function () {
+window.handleLogoutClick = function() {
     if (confirm("Thắng có chắc chắn muốn đăng xuất tài khoản thuế này không?")) {
 
         // 2. Gửi tin nhắn sang WinForms (C#)
@@ -255,7 +312,7 @@ window.handleLogoutClick = function () {
 
 // --- XỬ LÝ CHỌN NGÀY CHO ACCONLINE ---
 
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', function() {
     const dateFrom = document.getElementById('date-from');
     const dateTo = document.getElementById('date-to');
 
@@ -311,10 +368,16 @@ document.addEventListener('DOMContentLoaded', function () {
     // Gán sự kiện thay đổi cho cả 2 ô
     dateFrom.addEventListener('change', handleDateValidation);
     dateTo.addEventListener('change', handleDateValidation);
+
+    // Attach export button handlers
+    const btnXml = document.getElementById('btn-export-xml');
+    const btnPdf = document.getElementById('btn-export-pdf');
+    if (btnXml) btnXml.addEventListener('click', () => window.handleExportRequest('xml'));
+    if (btnPdf) btnPdf.addEventListener('click', () => window.handleExportRequest('pdf'));
 });
 
 // Hàm để C# bốc dữ liệu gửi sang Go
-window.getFilterParams = function () {
+window.getFilterParams = function() {
     return {
         fromDate: document.getElementById('date-from').value,
         toDate: document.getElementById('date-to').value
@@ -360,7 +423,7 @@ window.openDetailModal = function(inv) {
         thongTinLienQuan: raw(inv.thong_tin_lien_quan)
     };
 
-const finalHtml = `
+    const finalHtml = `
 <div id="${id}" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm no-print">
     <div class="relative w-full max-w-4xl bg-white border border-black flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 print:shadow-none print:border-none print:m-0">
         
@@ -472,7 +535,7 @@ const finalHtml = `
     document.body.insertAdjacentHTML('beforeend', finalHtml);
 
 };
-window.handleSearchClick = function () {
+window.handleSearchClick = function() {
     // 1. Lấy dữ liệu từ hàm bạn đã viết
     const params = window.getFilterParams();
 
@@ -487,7 +550,7 @@ window.handleSearchClick = function () {
         v = v.trim();
         if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
         const m1 = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-        if (m1) return `${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+        if (m1) return `${m1[3]}-${m1[2].padStart(2, '0')}-${m1[1].padStart(2, '0')}`;
         const parsed = new Date(v);
         if (!isNaN(parsed.getTime())) return parsed.toISOString().split('T')[0];
         return '';
@@ -545,6 +608,67 @@ window.handleSearchClick = function () {
         window.showAlert('Lỗi', 'Không tìm thấy kết nối ứng dụng (WebView2)!', 'error');
     }
 };
+
+// Export / Download handlers for XML and PDF
+window.handleExportRequest = function(type) {
+    // type: 'xml' | 'pdf'
+    const params = window.getFilterParams();
+    const selectCompany = document.getElementById('select-company');
+    const taxCode = selectCompany ? selectCompany.value : '';
+
+    if (!params.fromDate || !params.toDate) {
+        return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian trước khi xuất!', 'warning');
+    }
+
+    // Prepare payload
+    const payload = {
+        type: type,
+        fromDate: params.fromDate,
+        toDate: params.toDate,
+        taxCode: taxCode
+    };
+
+    // Prefer host (C#) to perform authenticated download since it has API credentials
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ action: 'REQUEST_DOWNLOAD_INVOICES', data: payload });
+        console.log('Download requested via WebView host', payload);
+        return;
+    }
+
+    // Fallback: if page exposes direct endpoints, try to fetch and trigger download
+    try {
+        const endpoint = (type === 'xml') ? (window.API_DOWNLOAD_XML || window.apiDownloadXml) : (window.API_DOWNLOAD_PDF || window.apiDownloadPdf);
+        if (endpoint) {
+            // Expect endpoint to accept query params: fromDate, toDate, taxCode
+            const q = new URL(endpoint, window.location.origin);
+            q.searchParams.set('fromDate', params.fromDate);
+            q.searchParams.set('toDate', params.toDate);
+            if (taxCode) q.searchParams.set('taxCode', taxCode);
+
+            fetch(q.toString(), { credentials: 'include' })
+                .then(r => {
+                    if (!r.ok) throw new Error('Server returned ' + r.status);
+                    return r.blob();
+                })
+                .then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `invoices_${params.fromDate}_${params.toDate}.${type === 'pdf' ? 'pdf' : 'zip'}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                })
+                .catch(err => window.showAlert('Lỗi tải', err.message || String(err), 'error'));
+            return;
+        }
+    } catch (e) {
+        console.error('fallback download error', e);
+    }
+
+    window.showAlert('Lỗi', 'Không thể thực hiện tải xuống — không tìm thấy kết nối phù hợp.', 'error');
+};
 function renderInvoices(invoices) {
     const tableBody = document.getElementById('crawler-results-body');
     tableBody.innerHTML = '';
@@ -560,7 +684,7 @@ function renderInvoices(invoices) {
         const row = document.createElement('tr');
         row.className = "hover:bg-blue-50/40 transition-all cursor-pointer group";
 
-       row.innerHTML = `
+        row.innerHTML = `
             <!-- STT: Tăng từ text-xs lên text-sm -->
             <td class="py-4 px-4 text-sm text-slate-500 font-mono text-center">${inv.stt}</td>
             
@@ -623,7 +747,7 @@ function renderInvoices(invoices) {
         if (viewBtn) {
             viewBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                try { console.log('invoice view button clicked', inv.so_hoa_don || inv.id || inv.stt); } catch (ex) {}
+                try { console.log('invoice view button clicked', inv.so_hoa_don || inv.id || inv.stt); } catch (ex) { }
                 if (typeof window.openDetailModal === 'function') {
                     window.openDetailModal(inv);
                 } else {
@@ -634,7 +758,7 @@ function renderInvoices(invoices) {
 
         // Row click opens detail as well (click outside the button)
         row.addEventListener('click', () => {
-            try { console.log('invoice row clicked', inv.so_hoa_don || inv.id || inv.stt); } catch (ex) {}
+            try { console.log('invoice row clicked', inv.so_hoa_don || inv.id || inv.stt); } catch (ex) { }
             if (typeof window.openDetailModal === 'function') {
                 window.openDetailModal(inv);
             } else {
@@ -655,7 +779,7 @@ window._invoiceCache = null;
 window._pageSize = 20;
 
 // Store invoices for client-side paging and show first page
-window.paginateClient = function (invoices, pageSize = 20) {
+window.paginateClient = function(invoices, pageSize = 20) {
     if (!Array.isArray(invoices)) return;
     window._invoiceCache = invoices;
     window._pageSize = pageSize || 20;
@@ -663,7 +787,7 @@ window.paginateClient = function (invoices, pageSize = 20) {
 };
 
 // Show a specific page from cached invoices
-window.showPage = function (page) {
+window.showPage = function(page) {
     if (!window._invoiceCache || window._invoiceCache.length === 0) return;
     const total = window._invoiceCache.length;
     const pageSize = window._pageSize || 20;
@@ -681,7 +805,7 @@ window.showPage = function (page) {
 };
 
 // Pagination helper: accepts total items, current page, page size
-window.renderPagination = function (totalItems, currentPage, pageSize) {
+window.renderPagination = function(totalItems, currentPage, pageSize) {
     const container = document.getElementById('crawler-pagination');
     const info = document.getElementById('crawler-pagination-info');
     if (!container) return;
@@ -693,7 +817,7 @@ window.renderPagination = function (totalItems, currentPage, pageSize) {
     container.innerHTML = '';
     // Prev button
     const prev = document.createElement('button');
-    prev.className = `px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 ${currentPage===1? 'opacity-50 cursor-not-allowed':''}`;
+    prev.className = `px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}`;
     prev.innerText = '‹';
     prev.disabled = (currentPage === 1);
     prev.dataset.page = currentPage - 1;
@@ -701,7 +825,7 @@ window.renderPagination = function (totalItems, currentPage, pageSize) {
 
     // Page numbers (condensed)
     const windowSize = 5;
-    const start = Math.max(1, currentPage - Math.floor(windowSize/2));
+    const start = Math.max(1, currentPage - Math.floor(windowSize / 2));
     const end = Math.min(totalPages, start + windowSize - 1);
     if (start > 1) {
         const first = document.createElement('button');
@@ -741,7 +865,7 @@ window.renderPagination = function (totalItems, currentPage, pageSize) {
 
     // Next button
     const next = document.createElement('button');
-    next.className = `px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 ${currentPage===totalPages? 'opacity-50 cursor-not-allowed':''}`;
+    next.className = `px-3 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}`;
     next.innerText = '›';
     next.disabled = (currentPage === totalPages);
     next.dataset.page = currentPage + 1;
@@ -779,7 +903,7 @@ function getStatusStyle(status) {
     if (s.includes("gốc") || s.includes("mới")) return "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200";
     return "bg-slate-50 text-slate-500 ring-1 ring-slate-200";
 }
-window.updateCrawlerStatus = function (data) {
+window.updateCrawlerStatus = function(data) {
     const statusBox = document.getElementById('crawler-status-box');
     const statusText = document.getElementById('crawler-current-status');
     const subDetail = document.getElementById('crawler-sub-detail');
@@ -815,3 +939,132 @@ window.updateCrawlerStatus = function (data) {
         statusText.classList.remove('text-emerald-600');
     }
 };
+/**
+ * Hàm xử lý xuất XML và Cào dữ liệu hóa đơn.
+ * Quy trình: Chọn thư mục -> Gửi lệnh Cào -> Chờ phản hồi từ C# (Backend) -> Hoàn tất.
+ * @param {HTMLElement} btn -Nút bấm được click để điều khiển trạng thái UI.
+             */
+async function handleExportXml(btn) {
+     debugger;
+    const originalContent = btn.innerHTML;
+    const outputDir = "C:\\Downloads"; 
+
+    // 1. Cập nhật trạng thái UI ban đầu (Loading)
+    btn.disabled = true;
+    btn.innerHTML = `<span class="text-sm">⏳</span> Đang cào...`;
+
+    // Kiểm tra môi trường WebView2 (tránh lỗi trên trình duyệt thường)
+    if (!(window.chrome?.webview)) {
+        console.error("WebView2 chưa sẵn sàng!");
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+        return;
+    }
+
+    // 2. Khởi tạo requestId duy nhất để khớp nối dữ liệu giữa FE và BE
+    const requestId = Math.random().toString(36).slice(2);
+    window._pendingWebviewRequests = window._pendingWebviewRequests || {};
+
+    // 3. Tạo một Promise để bao bọc toàn bộ quá trình giao tiếp bất đồng bộ
+    const promise = new Promise((resolve, reject) => {
+        // Thiết lập Timeout sau 60s để tránh treo UI nếu Backend không phản hồi
+        const timer = setTimeout(() => {
+            try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+            reject(new Error("Timeout chờ phản hồi từ host (60 giây)"));
+        }, 60000);
+
+        /**
+         * Định nghĩa hàm xử lý phản hồi dành riêng cho requestId này.
+         * Hàm này sẽ được gọi nhiều lần bởi "Trạm điều phối trung tâm" khi BE gửi tin nhắn lên.
+         */
+        window._pendingWebviewRequests[requestId] = (payload) => {
+            try {
+                const action = payload && payload.action;
+
+                // Case: Backend xác nhận đã nhận lệnh và bắt đầu tiến trình
+                if (action === 'START_CRAWL_ACK') {
+                    btn.innerHTML = `<span class="text-sm">⏳</span> Đã bắt đầu...`;
+                    return;
+                }
+
+                // Case: Cập nhật trạng thái chi tiết trong quá trình chạy (SSE progress)
+                if (action === 'CRAWL_STATUS_UPDATE') {
+                    if (payload.status) {
+                        const statusEl = document.getElementById('status-text');
+                        if (statusEl) statusEl.innerText = 'Trạng thái: ' + payload.status;
+                    }
+                    return;
+                }
+
+                // Case: Nhận kết quả chọn thư mục từ WinForms FolderBrowserDialog
+                if (action === 'OUTPUT_DIR_SELECTED') {
+                    const out = payload.output_dir || payload.outputDir || payload.outputDirPath || '';
+                    if (!out) {
+                        clearTimeout(timer);
+                        try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                        reject(new Error('Không có đường dẫn lưu được chọn'));
+                        return;
+                    }
+
+                    // Sau khi có folder, tự động gửi lệnh yêu cầu Backend bắt đầu Cào (Crawl)
+                    window.chrome.webview.postMessage({ 
+                        action: 'START_CRAWL', 
+                        output_dir: out, 
+                        requestId 
+                    });
+                    btn.innerHTML = `<span class="text-sm">⏳</span> Đang bắt đầu...`;
+                    return;
+                }
+
+                // Case: Backend báo lỗi trong quá trình xử lý
+                if (action === 'CRAWL_ERROR') {
+                    clearTimeout(timer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    const msg = payload.message || payload.Message || 'Lỗi không xác định';
+                    reject(new Error(msg));
+                    return;
+                }
+
+                // Case: Hoàn tất thành công
+                if (action === 'CRAWL_FINISHED') {
+                    clearTimeout(timer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    resolve(payload); // Kết thúc Promise thành công
+                    return;
+                }
+
+                // Dự phòng (Fallback): Kết thúc nếu nhận được bất kỳ kết quả done nào khác
+                if (payload && (payload.result || payload.status === 'done')) {
+                    clearTimeout(timer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    resolve(payload);
+                    return;
+                }
+
+            } catch (ex) {
+                clearTimeout(timer);
+                try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                reject(ex);
+            }
+        };
+    });
+
+    // 4. Kích hoạt quy trình: Yêu cầu Backend mở hộp thoại chọn thư mục lưu file
+    window.chrome.webview.postMessage({
+        action: "REQUEST_SELECT_OUTPUT_DIR",
+        requestId
+    });
+
+    // 5. Chờ đợi kết quả từ Promise và xử lý thông báo cuối cùng
+    try {
+        const result = await promise; // Chờ cho đến khi resolve() được gọi bên trong callback
+        alert(result?.message || "Hoàn tất xuất XML");
+    } catch (err) {
+        console.error("Export failed:", err);
+        alert("Lỗi khi xuất: " + (err.message || "Không xác định"));
+    } finally {
+        // Luôn khôi phục trạng thái nút bấm dù thành công hay thất bại
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+    }
+} 

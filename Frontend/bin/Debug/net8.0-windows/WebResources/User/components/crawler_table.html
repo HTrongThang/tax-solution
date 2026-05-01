@@ -72,11 +72,13 @@
 
                 <div class="w-[1px] h-6 bg-slate-200 mx-1"></div>
 
-                <button class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
+                <button id="btn-export-xml"
+                        onclick="handleExportXml(this)"
+                        class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
                     <span class="text-sm">📄</span> XML-HTML
                 </button>
 
-                <button class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-red-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
+                <button id="btn-export-pdf" class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-red-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
                     <span class="text-sm">📕</span> PDF GỐC
                 </button>
 
@@ -147,3 +149,5 @@
         <span id="crawler-sub-detail" class="text-[10px] text-slate-400 mt-1 truncate">Đang kết nối hệ thống thuế...</span>
     </div>
 </div>
+<div id="crawler-status-box"
+     class="fixed top-24 left-1/2 -translate-x-1/2 z-[9999] w-[350px] pointer-events-none bg-white p-4 rounded-2xl shadow-2xl border border-emerald-100 flex items-center gap-4 hidden">

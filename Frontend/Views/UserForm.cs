@@ -1,29 +1,37 @@
 ﻿using Frontend.Models;
+using Frontend.Services;
 using Microsoft.Web.WebView2.Core;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
-using Newtonsoft.Json;
-using Frontend.Services;
-using System.IO;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 using Formatting = Newtonsoft.Json.Formatting;
 namespace Frontend.Views
 {
     public partial class UserForm : Form
     {
+        private bool _isCrawling = false;
         private readonly TaxService _taxService = new TaxService();
         private CancellationTokenSource _searchCts;
+        // Current crawl request id received from frontend (if any)
+        private string _currentCrawlRequestId;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
         private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
         private readonly string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
+        // Lock để đồng bộ truy cập file
+        private readonly object _fileLock = new object();
         // Semaphore để tuần tự hóa các lệnh ExecuteScriptAsync tới WebView2
         private readonly SemaphoreSlim _webviewSemaphore = new SemaphoreSlim(1, 1);
         public UserForm()
@@ -58,7 +66,8 @@ namespace Frontend.Views
             // 4. ĐĂNG KÝ SỰ KIỆN TRƯỚC KHI NAVIGATE
             webViewUser.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
 
-            webViewUser.NavigationCompleted += async (s, args) => {
+            webViewUser.NavigationCompleted += async (s, args) =>
+            {
                 if (args.IsSuccess)
                 {
                     await SyncHeaderWithSession();
@@ -144,7 +153,8 @@ namespace Frontend.Views
             switch (action)
             {
                 case "LOGOUT":
-                    this.Invoke(new Action(() => {
+                    this.Invoke(new Action(() =>
+                    {
                         this.Close();
                     }));
                     break;
@@ -178,10 +188,8 @@ namespace Frontend.Views
                         }
                         _cachedCompanies.Add(newCompany);
 
-                        // 4. GHI FILE: Thực hiện ghi xuống ổ cứng để lưu trữ lâu dài
-                        // Thắng nên dùng Formatting.Indented để file JSON dễ đọc
-                        string jsonOutput = JsonConvert.SerializeObject(_cachedCompanies, Newtonsoft.Json.Formatting.Indented);
-                        File.WriteAllText(filePath, jsonOutput);
+                        // 4. GHI FILE: Thực hiện ghi xuống ổ cứng để lưu trữ lâu dài (thread-safe)
+                        WriteCompaniesToFile(_cachedCompanies);
 
                         // 5. PHẢN HỒI GIAO DIỆN: Gom lệnh để chạy cực nhanh
                         // Vừa hiện alert đẹp, vừa đóng modal thêm mới (nếu có), vừa render lại dropdown
@@ -226,8 +234,8 @@ namespace Frontend.Views
                         }
 
                         // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
-                        string jsonOutput = JsonConvert.SerializeObject(_cachedCompanies, Newtonsoft.Json.Formatting.Indented);
-                        File.WriteAllText(filePath, jsonOutput);
+                        // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
+                        WriteCompaniesToFile(_cachedCompanies);
 
                         // 3. PHẢN HỒI GIAO DIỆN: Gom lệnh để Web cập nhật ngay lập tức
                         string jsDeleteSuccess = $@"
@@ -381,7 +389,8 @@ namespace Frontend.Views
                         int pageSize = packet.data.pageSize;
                         // Call backend API to get specific page (implement if supported by backend)
                         // For now we forward to Go service via TaxService if implemented
-                        _ = Task.Run(async () => {
+                        _ = Task.Run(async () =>
+                        {
                             try
                             {
                                 var pageResult = await _taxService.GetInvoicesPageAsync(page, pageSize);
@@ -399,6 +408,66 @@ namespace Frontend.Views
                     }
                     catch { }
                     break;
+                case "REQUEST_SELECT_OUTPUT_DIR":
+                    try
+                    {
+                        // Phải chạy trên UI Thread vì FolderBrowserDialog là thành phần giao diện
+                        this.Invoke(new Action(async () =>
+                        {
+                            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+                            {
+                                fbd.Description = "Chọn thư mục để lưu tệp XML và hóa đơn cào được";
+
+                                if (fbd.ShowDialog() == DialogResult.OK)
+                                {
+                                    // Gửi đường dẫn đã chọn về cho Frontend kèm theo requestId để khớp Promise
+                                    var response = new
+                                    {
+                                        action = "OUTPUT_DIR_SELECTED",
+                                        output_dir = fbd.SelectedPath,
+                                        requestId = packet.requestId // Quan trọng: Trả lại đúng ID này
+                                    };
+                                    await PostWebMessageAsJson(response);
+                                }
+                                else
+                                {
+                                    // Nếu người dùng bấm Cancel, cũng phải báo về để FE tắt trạng thái Loading
+                                    var cancelResponse = new
+                                    {
+                                        action = "CRAWL_ERROR",
+                                        message = "Người dùng đã hủy chọn thư mục.",
+                                        requestId = packet.requestId
+                                    };
+                                    await PostWebMessageAsJson(cancelResponse);
+                                }
+                            }
+                        }));
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("Lỗi REQUEST_SELECT_OUTPUT_DIR: " + ex.Message);
+                    }
+                    break;
+                case "START_CRAWL":
+                    string outputDir = packet?.output_dir?.ToString();
+                    string requestId = packet?.requestId != null ? packet.requestId.ToString() : null;
+
+                    if (string.IsNullOrWhiteSpace(outputDir))
+                    {
+                        var errorPayload = new { action = "CRAWL_ERROR", message = "Vui lòng chọn thư mục lưu trữ trước khi bắt đầu!", requestId };
+                        await PostWebMessageAsJson(errorPayload);
+                        break;
+                    }
+
+                    // Store requestId for later status messages and send an ACK back to FE immediately
+                    _currentCrawlRequestId = requestId;
+                    // Send ACK so frontend promise resolves and can update UI
+                    var ackPayload = new { action = "START_CRAWL_ACK", requestId = requestId, status = "accepted", message = "Yêu cầu crawl đã được nhận" };
+                    await PostWebMessageAsJson(ackPayload);
+
+                    await HandleStartCrawl(outputDir, requestId);
+                    break;
+
             }
         }
         private async Task SendJsonDataToWeb(string filePath)
@@ -448,8 +517,7 @@ namespace Frontend.Views
             }}
         }})();";
 
-                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsCommand);
-                // Ensure serialization
+                // Use serialized execution to avoid concurrent calls
                 _ = ExecuteScriptSerializedAsync(jsCommand);
             }
         }
@@ -569,5 +637,90 @@ namespace Frontend.Views
                 await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi hệ thống', '{ex.Message}', 'error')");
             }
         }
+
+        private async Task HandleStartCrawl(string path, string requestId = null)
+        {
+            if (_isCrawling) return;
+            // Pass requestId to backend if TaxService supports it in future. For now, store locally.
+            var (status, message) = await _taxService.StartCrawlAsync(path);
+
+            if (status == "success")
+            {
+                _isCrawling = true;
+                _ = RunStatusPolling();
+            }
+            else
+            {
+                MessageBox.Show("Không thể bắt đầu: " + message);
+                var payload = new { action = "CRAWL_ERROR", message = message, requestId };
+                await PostWebMessageAsJson(payload);
+            }
+        }
+        private async Task RunStatusPolling()
+        {
+            try
+            {
+                while (_isCrawling)
+                {
+                    var statusInfo = await _taxService.GetStatus();
+                    if (statusInfo != null)
+                    {
+                        await PostWebMessageAsJson(new
+                        {
+                            action = "CRAWL_STATUS_UPDATE",
+                            status = statusInfo.current_status,
+                            is_running = statusInfo.is_running,
+                            requestId = _currentCrawlRequestId
+                        });
+
+                        if (!statusInfo.is_running) _isCrawling = false;
+                    }
+                    if (_isCrawling) await Task.Delay(1000);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"Polling Error: {ex.Message}"); }
+            finally
+            {
+                _isCrawling = false;
+                await PostWebMessageAsJson(new { action = "CRAWL_FINISHED", requestId = _currentCrawlRequestId });
+                // clear stored request id after finishing
+                _currentCrawlRequestId = null;
+            }
+        }
+        private async Task PostWebMessageAsJson(object data)
+        {
+            if (webViewUser?.CoreWebView2 != null)
+            {
+                string json = JsonConvert.SerializeObject(data);
+                // Marshal về UI Thread nếu cần
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(new Action(() => webViewUser.CoreWebView2.PostWebMessageAsJson(json)));
+                }
+                else
+                {
+                    webViewUser.CoreWebView2.PostWebMessageAsJson(json);
+                }
+            }
+            await Task.CompletedTask;
+        }
+
+        // Helper: Thread-safe file write for tax_accounts.json
+        private void WriteCompaniesToFile(List<CompanyModel> companies)
+        {
+            try
+            {
+                lock (_fileLock)
+                {
+                    string jsonOutput = JsonConvert.SerializeObject(companies, Formatting.Indented);
+                    File.WriteAllText(filePath, jsonOutput);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("WriteCompaniesToFile error: " + ex.Message);
+            }
+        }
+
     }
 }
