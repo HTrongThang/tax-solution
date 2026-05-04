@@ -28,7 +28,6 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 	{
 		taxRoutes.GET("/init", h.InitTaxPage)
 		taxRoutes.POST("/login", h.LoginTax)
-		taxRoutes.POST("/crawl", h.StartCrawling)
 		taxRoutes.GET("/captcha", h.GetCaptcha)
 		taxRoutes.GET("/searchInvoice", h.GetInvoices)
 		taxRoutes.POST("/start-crawl", h.StartCrawl)
@@ -37,9 +36,7 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 	}
 }
 
-func (h *Handler) StartCrawling(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"message": "Đang bắt đầu cào dữ liệu..."})
-}
+
 func (h *Handler) InitTaxPage(c *gin.Context) {
 	// Gọi hàm Init mới của Thu
 	err := h.Crawler.ShowLogin()
@@ -130,6 +127,14 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 		return
 	}
 
+	// Deduplication: Từ chối nếu đang có tác vụ search/crawl chạy
+	if h.Crawler.IsRunning {
+		c.JSON(http.StatusConflict, gin.H{
+			"message": "Hệ thống đang bận xử lý tác vụ khác. Vui lòng đợi hoàn thành trước.",
+		})
+		return
+	}
+
 	// Headers SSE
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -170,11 +175,17 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 		return
 	}
 
-	// 2. Lấy đường dẫn từ Postman (Query Param: output_dir)
-	// Nếu Thắng gọi: .../start-crawl?output_dir=D:\MyInvoices
-	outputDir := c.Query("output_dir")
+	// 2. Đọc output_dir từ JSON body (C# gửi { "path": "..." })
+	var req struct {
+		Path string `json:"path"`
+	}
 
-	// Nếu Thắng không truyền gì, lúc này mới dùng giá trị mặc định
+	outputDir := ""
+	if err := c.ShouldBindJSON(&req); err == nil && req.Path != "" {
+		outputDir = req.Path
+	}
+
+	// Nếu không có giá trị hợp lệ, mới dùng fallback
 	if outputDir == "" {
 		outputDir = "C:\\TaxData\\Downloads"
 		fmt.Println("⚠️ Không có output_dir, sử dụng mặc định: " + outputDir)

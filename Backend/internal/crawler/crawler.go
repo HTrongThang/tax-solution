@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -32,15 +31,23 @@ type CrawlerService struct {
 // Sửa chỗ này: Xóa crawler. trước CrawlerService
 func NewCrawlerService() *CrawlerService {
 	l := launcher.New().
-		Bin("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe").
 		Leakless(false).
 		Headless(false)
+
+	// Tự tìm Chrome/Chromium được cài trên máy thay vì hardcode path
+	if chromePath, found := launcher.LookPath(); found {
+		l = l.Bin(chromePath)
+		fmt.Printf("💻 Dùng trình duyệt từ: %s\n", chromePath)
+	} else {
+		// Fallback về đường dẫn mặc định nếu LookPath không tìm thấy
+		fmt.Println("⚠️ Không tìm thấy Chrome tự động, dùng đường dẫn mặc định")
+		l = l.Bin("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
+	}
 	l.Append("--start-maximized")
 
 	url := l.MustLaunch()
 	browser := rod.New().ControlURL(url).MustConnect()
 
-	// Sửa chỗ này luôn: Xóa crawler.
 	return &CrawlerService{
 		Browser: browser,
 	}
@@ -76,7 +83,7 @@ func (s *CrawlerService) ShowLogin() error {
 func (s *CrawlerService) GetCaptcha() (string, error) {
 	fmt.Println("📸 Đang lấy mã Captcha TRONG khung Đăng nhập...")
 
-	// 1. Chờ Dialog hiện lên hẳn (Dùng s.Page cho đồng bộ với struct của Thu nhé)
+	// 1. Chờ Dialog hiện lên hẳn
 	s.Page.MustElement(".ant-modal-content").MustWaitVisible()
 
 	// 2. SELECTOR THẦN THÁNH
@@ -86,20 +93,11 @@ func (s *CrawlerService) GetCaptcha() (string, error) {
 	el.MustWaitVisible()
 	time.Sleep(1 * time.Second)
 
-	// 4. Chụp ảnh
+	// 4. Chụp ảnh và encode Base64 (không lưu file, không mở app)
 	imgData := el.MustScreenshot("")
-
-	// 5. Vừa lưu file để Thu test, vừa chuẩn bị Base64
-	fileName := "current_captcha.png"
-	os.WriteFile(fileName, imgData, 0644)
-
-	// Mở file lên cho Thu xem (Chỉ dùng khi đang code test)
-	_ = exec.Command("cmd", "/c", "start", fileName).Run()
-
 	encoded := base64.StdEncoding.EncodeToString(imgData)
 
-	fmt.Println("✅ Đã lấy xong mã Captcha và lưu file thành công!")
-
+	fmt.Println("✅ Đã lấy xong mã Captcha!")
 	return encoded, nil
 }
 func (c *CrawlerService) Login(user, pass, captcha string) error {
@@ -183,7 +181,9 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	c.IsRunning = true
 	c.TotalInvoices = 0
 
-	c.GrantPermissions()
+	// Chỉ setup browser download behavior, không tạo OutputDir
+	// (OutputDir chỉ càn khi export XML, không phải khi search)
+	c.SetupBrowserDownload()
 
 	if stream != nil {
 		stream <- models.StreamData{Status: "🚀 Đang khởi động bot...", IsDone: false}
@@ -212,6 +212,21 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	c.selectDateOnCalendar("#dngay input", toDate)
 	c.Page.MustElement("button.ant-btn-primary[type='submit']").MustClick()
 
+	// Đợi 1.5s để cho website xử lý request → notification kịp xuất hiện
+	time.Sleep(1500 * time.Millisecond)
+	// Kiểm tra lỗi ngay sau click (trước khi bắt đầu vòng poll)
+	if hasErr, errEl, _ := c.Page.Has(".ant-notification-notice-message"); hasErr {
+		var earlyErr string
+		_ = rod.Try(func() { earlyErr = strings.TrimSpace(errEl.MustText()) })
+		if earlyErr != "" {
+			fmt.Printf("❌ Phát hiện lỗi sớm sau search: %s\n", earlyErr)
+			if stream != nil {
+				stream <- models.StreamData{Status: "❌ Lỗi từ hệ thống thuế: " + earlyErr, IsDone: true}
+			}
+			return allInvoices, fmt.Errorf("lỗi website thuế: %s", earlyErr)
+		}
+	}
+
 	// --- 3. VÒNG LẶP ---
 	maxPages := 1
 	lastFirstInvoiceNo := ""
@@ -226,6 +241,25 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		// A. Đợi và lấy thông tin tổng số kết quả
 		foundData := false
 		for i := 0; i < 40; i++ {
+			// FIX: Phát hiện lỗi website thuế (Ant Design notification "Request failed with status code 500")
+			// Dùng rod.Try + MustText() thay vì .Text() để tránh bỏ qua lỗi do điều kiện quá chặt
+			if hasErr, errEl, _ := c.Page.Has(".ant-notification-notice-message"); hasErr {
+				var errMsg string
+				_ = rod.Try(func() {
+					errMsg = strings.TrimSpace(errEl.MustText())
+				})
+				if errMsg != "" {
+					fmt.Printf("❌ Website thuế báo lỗi: %s\n", errMsg)
+					if stream != nil {
+						stream <- models.StreamData{
+							Status: "❌ Lỗi từ hệ thống thuế: " + errMsg,
+							IsDone: true,
+						}
+					}
+					return allInvoices, fmt.Errorf("lỗi website thuế: %s", errMsg)
+				}
+			}
+
 			el, err := c.Page.ElementR("span", `Có\s\d+\skết quả`)
 			if err == nil {
 				txt := el.MustText()
@@ -255,7 +289,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 				foundData = true
 				break
 			}
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond) // Giảm từ 500ms → 300ms để bắt notification kịp
 		}
 		// Gửi trạng thái trang hiện tại
 		if stream != nil {
@@ -268,7 +302,12 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 
 		if !foundData {
-			return allInvoices, fmt.Errorf("timeout đợi dữ liệu trang %d", pageIdx)
+			// Gửi IsDone:true trước khi return để C#/JS biết search đã kết thúc
+			errMsg := fmt.Sprintf("Timeout chờ kết quả trang %d — website thuế có thể đang bị lỗi", pageIdx)
+			if stream != nil {
+				stream <- models.StreamData{Status: "❌ " + errMsg, IsDone: true}
+			}
+			return allInvoices, fmt.Errorf(errMsg)
 		}
 
 		// B. Cập nhật số trang
@@ -388,7 +427,8 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) {
 	}
 
 	dayst := strings.TrimLeft(parts[0], "0")
-	monthst := parts[1]
+	// FIX: Convert sang số để so sánh đúng ("01" == "1" khi là số)
+	monthInt, _ := strconv.Atoi(parts[1])
 	yearst := parts[2]
 
 	fmt.Printf("📅 Đang chọn %s cho ô %s...\n", dateStr, selector)
@@ -398,10 +438,14 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) {
 	elInput.MustClick()
 	time.Sleep(800 * time.Millisecond)
 
-	// --- Vòng lặp chọn Năm ---
-	for {
+	// --- Vòng lặp chọn Năm --- (tối đa 20 lần, tránh treo vĩnh viễn)
+	for i := 0; i < 20; i++ {
 		calYear := c.Page.MustElement(".ant-calendar-year-select").MustText()
 		if calYear == yearst {
+			break
+		}
+		if i == 19 {
+			fmt.Printf("⚠️ Timeout chọn năm %s (còn hiển %s), bỏ qua\n", yearst, calYear)
 			break
 		}
 		if yearst > calYear {
@@ -412,17 +456,23 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) {
 		time.Sleep(150 * time.Millisecond)
 	}
 
-	// --- Vòng lặp chọn Tháng ---
-	for {
+	// --- Vòng lặp chọn Tháng --- (tối đa 15 lần, tránh treo vĩnh viễn)
+	// FIX: Dùng so sánh số thay vì string để tránh "01" != "1"
+	for i := 0; i < 15; i++ {
 		calMonthFull := c.Page.MustElement(".ant-calendar-month-select").MustText()
-		// Làm sạch chuỗi tháng (Xóa "Thg" hoặc "Tháng")
-		calMonth := strings.TrimSpace(strings.ReplaceAll(calMonthFull, "Thg", ""))
-		calMonth = strings.TrimSpace(strings.ReplaceAll(calMonth, "Tháng", ""))
+		// Làm sạch chuỗi tháng (Xóa "Thg" hoặc "Tháng"), strip số 0 đầu
+		calMonthStr := strings.TrimSpace(strings.ReplaceAll(calMonthFull, "Thg", ""))
+		calMonthStr = strings.TrimSpace(strings.ReplaceAll(calMonthStr, "Tháng", ""))
+		calMonthInt, _ := strconv.Atoi(strings.TrimSpace(calMonthStr))
 
-		if calMonth == monthst {
+		if calMonthInt == monthInt {
 			break
 		}
-		if monthst > calMonth {
+		if i == 14 {
+			fmt.Printf("⚠️ Timeout chọn tháng %d (còn hiển %d), bỏ qua\n", monthInt, calMonthInt)
+			break
+		}
+		if monthInt > calMonthInt {
 			c.Page.MustElement(".ant-calendar-next-month-btn").MustClick()
 		} else {
 			c.Page.MustElement(".ant-calendar-prev-month-btn").MustClick()
@@ -447,14 +497,37 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) {
 	}
 	time.Sleep(500 * time.Millisecond)
 }
+
+// SetupBrowserDownload: Chỉ cấu hình browser download đến Invoices_Temp.
+// Dùng khi SEARCH — không tạo/set OutputDir.
+func (c *CrawlerService) SetupBrowserDownload() {
+	homeDir, _ := os.UserHomeDir()
+	downloadDir := filepath.Join(homeDir, "Downloads", "Invoices_Temp")
+	os.MkdirAll(downloadDir, os.ModePerm)
+	proto.BrowserSetDownloadBehavior{
+		Behavior:      proto.BrowserSetDownloadBehaviorBehaviorAllow,
+		DownloadPath:  downloadDir,
+		EventsEnabled: true,
+	}.Call(c.Page)
+	fmt.Printf("📲 Browser download đã được cấu hình vào: %s\n", downloadDir)
+}
+
+// GrantPermissions: Setup browser download VÀ tạo OutputDir.
+// Dùng khi EXPORT XML (CrawlAllPages).
 func (c *CrawlerService) GrantPermissions() {
 	homeDir, _ := os.UserHomeDir()
-	// Lấy thời gian lúc bắt đầu chạy (Dùng làm tên folder chung)
-	timeStr := time.Now().Format("20060102_150405")
 
 	downloadDir := filepath.Join(homeDir, "Downloads", "Invoices_Temp")
-	// Lưu đường dẫn vào struct để dùng xuyên suốt
-	c.OutputDir = filepath.Join(homeDir, "Downloads", "Invoices_Output_"+timeStr)
+
+	// Chỉ tạo thư mục timestamp khi OutputDir chưa được set từ API
+	// (tránh ghi đè đường dẫn mà người dùng đã chọn)
+	if c.OutputDir == "" {
+		timeStr := time.Now().Format("20060102_150405")
+		c.OutputDir = filepath.Join(homeDir, "Downloads", "Invoices_Output_"+timeStr)
+		fmt.Printf("⚠️  OutputDir chưa được set, dùng mặc định: %s\n", c.OutputDir)
+	} else {
+		fmt.Printf("✅ Dùng OutputDir đã chọn: %s\n", c.OutputDir)
+	}
 
 	os.MkdirAll(downloadDir, os.ModePerm)
 	os.MkdirAll(c.OutputDir, os.ModePerm)
@@ -466,6 +539,7 @@ func (c *CrawlerService) GrantPermissions() {
 	}.Call(c.Page)
 
 	fmt.Printf("🚀 Khởi tạo thành công!\n📁 Folder lưu chính: %s\n", c.OutputDir)
+
 }
 func (c *CrawlerService) CrawlAllPages() {
 	// 1. Khởi tạo trạng thái bắt đầu
@@ -483,6 +557,25 @@ func (c *CrawlerService) CrawlAllPages() {
 	}()
 
 	fmt.Println("🚀 Bắt đầu quy trình cào đa trang...")
+	// FIX: SearchAndGetInvoices kết thúc ở trang CUỐI → phải quay về trang 1
+	// Website dùng custom button với icon anticon-left (không có .ant-pagination-item-1)
+	c.CurrentStatus = "Đang quay về trang đầu tiên..."
+	fmt.Println("⏮️ Đang reset về trang 1 bằng nút mũi tên trái...")
+
+	for i := 0; i < 200; i++ {
+		prevBtn, err := c.Page.ElementX("//button[.//i[contains(@class,'anticon-left')]]")
+		if err != nil {
+			fmt.Println("✅ Không tìm thấy nút Prev — đã về trang 1 hoặc chỉ có 1 trang.")
+			break
+		}
+		if disabled, _ := prevBtn.Attribute("disabled"); disabled != nil {
+			fmt.Println("✅ Nút Prev disabled — đã về trang 1.")
+			break
+		}
+		prevBtn.MustClick()
+		time.Sleep(500 * time.Millisecond)
+	}
+	time.Sleep(1 * time.Second)
 
 	for page := 1; ; page++ {
 		// Cập nhật trạng thái trang hiện tại cho FE

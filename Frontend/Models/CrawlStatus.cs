@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -13,5 +13,8 @@ namespace Frontend.Models
 
         // Khớp với struct bên Go (json:"is_running")
         public bool is_running { get; set; }
+
+        // Khớp với struct bên Go (json:"total_invoices")
+        public int total_invoices { get; set; }
     }
 }

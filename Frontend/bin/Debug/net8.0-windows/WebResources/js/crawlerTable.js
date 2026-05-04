@@ -1,5 +1,5 @@
 // Hàm vẽ danh sách công ty vào Dropdown
-window.renderCompanyDropdown = function() {
+window.renderCompanyDropdown = function () {
     const selectCompany = document.getElementById('select-company');
     if (!selectCompany) return;
 
@@ -24,7 +24,7 @@ window.renderCompanyDropdown = function() {
 // Centralized listener: also supports per-request callbacks via window._pendingWebviewRequests
 window._pendingWebviewRequests = window._pendingWebviewRequests || {};
 if (window.chrome?.webview) {
-    window.chrome.webview.addEventListener('message', function(e) {
+    window.chrome.webview.addEventListener('message', function (e) {
         try {
             const payload = (typeof e.data === 'string') ? JSON.parse(e.data) : e.data;
             if (!payload) return;
@@ -81,7 +81,7 @@ if (window.chrome?.webview) {
             }
 
             if (payload.action === "CRAWL_FINISHED") {
-                try { alert("Đã cào xong hóa đơn!"); } catch { }
+                try { window.showAlert?.('Đã hoàn thành', 'Đã cào xong hóa đơn!', 'success'); } catch { }
                 if (window.finalizeSearchUI) window.finalizeSearchUI();
                 return;
             }
@@ -94,7 +94,7 @@ if (window.chrome?.webview) {
 }
 
 // Centralized SSE progress handler so logic is in one place and reusable
-window.handleSseProgress = function(data) {
+window.handleSseProgress = function (data) {
     if (!data) return;
 
     // Update status box
@@ -136,23 +136,32 @@ window.handleSseProgress = function(data) {
 };
 
 // Restore UI when search completes or watchdog triggers
-window.finalizeSearchUI = function() {
+window.finalizeSearchUI = function () {
     try {
-        // enable search button
+        // Enable lại nút search
         const btn = document.getElementById('btn-search');
         if (btn) {
             btn.disabled = false;
-            if (btn.dataset && btn.dataset.origText) btn.innerText = btn.dataset.origText;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.innerHTML = '🔍 Tìm kiếm';
         }
 
-        // hide status card if visible
-        const statusBox = document.getElementById('crawler-status-box');
-        if (statusBox) {
-            statusBox.style.opacity = '0';
-            setTimeout(() => { statusBox.style.setProperty('display', 'none', 'important'); statusBox.innerHTML = ''; }, 260);
+        // Ẩn modal nếu đang hiển và chưa tự ẩn
+        const modal = document.getElementById('crawl-progress-modal');
+        if (modal && modal.style.display !== 'none') {
+            setTimeout(() => {
+                modal.style.transition = 'opacity 0.35s ease';
+                modal.style.opacity = '0';
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                    modal.style.opacity = '1';
+                    modal.style.transition = '';
+                }, 380);
+            }, 2500);
         }
 
-        // clear watchdog
+        // Clear watchdog
         if (window._searchWatchdogId) {
             clearTimeout(window._searchWatchdogId);
             window._searchWatchdogId = null;
@@ -162,7 +171,7 @@ window.finalizeSearchUI = function() {
 
 // Unified pagination handler. If invoices array provided, use client-side paging and cache.
 // Otherwise render empty pagination using totalItems and request pages from host on click.
-window.handlePagination = function({ invoices = null, totalItems = 0, currentPage = 1, pageSize = 20 }) {
+window.handlePagination = function ({ invoices = null, totalItems = 0, currentPage = 1, pageSize = 20 }) {
     if (Array.isArray(invoices) && invoices.length) {
         // cache and show first page (or requested page)
         paginateClient(invoices, pageSize);
@@ -173,7 +182,7 @@ window.handlePagination = function({ invoices = null, totalItems = 0, currentPag
     }
 };
 // Hàm 1: Trung gian - Gọi khi bấm nút
-window.handleLoginClick = function(btn) {
+window.handleLoginClick = function (btn) {
     // Hiệu ứng loading để người dùng không bấm lung tung
     const originalText = btn.innerText;
     btn.innerText = "Đang kết nối...";
@@ -194,13 +203,13 @@ window.handleLoginClick = function(btn) {
 };
 
 // Hủy tìm kiếm - gửi lệnh tới C#
-window.handleCancelClick = function() {
+window.handleCancelClick = function () {
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({ action: 'CANCEL_SEARCH' });
     }
 };
 // Hàm 2: Chỉ làm nhiệm vụ hiển thị (C# sẽ gọi hàm này)
-window.openCaptcha = function(captchaBase64) {
+window.openCaptcha = function (captchaBase64) {
     const modal = document.getElementById('captcha-modal');
     const img = document.getElementById('img-captcha');
     const input = document.getElementById('input-captcha');
@@ -219,12 +228,12 @@ window.openCaptcha = function(captchaBase64) {
 };
 
 // Hàm đóng Popup
-window.closeCaptcha = function() {
+window.closeCaptcha = function () {
     document.getElementById('captcha-modal').classList.add('hidden');
     document.getElementById('input-captcha').value = '';
 };
 
-window.handleLogout = function() {
+window.handleLogout = function () {
     // Báo cho C# biết là Thắng muốn Logout
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({
@@ -233,7 +242,7 @@ window.handleLogout = function() {
     }
 };
 
-window.submitCaptcha = function() {
+window.submitCaptcha = function () {
     const inputCaptcha = document.getElementById('input-captcha');
     const selectCompany = document.getElementById('select-company');
 
@@ -263,7 +272,7 @@ window.submitCaptcha = function() {
     if (inputCaptcha) inputCaptcha.disabled = true;
 };
 
-window.updateLoginStatus = function(isLoggedIn) {
+window.updateLoginStatus = function (isLoggedIn) {
     const btn = document.getElementById('btn-auth');
     if (!btn) return;
 
@@ -285,7 +294,7 @@ window.updateLoginStatus = function(isLoggedIn) {
 };
 
 // Hàm trung gian điều hướng sự kiện
-window.handleAuthAction = function(btn) {
+window.handleAuthAction = function (btn) {
     if (btn.dataset.state === "logged-in") {
         return handleLogoutClick(); // Gọi hàm Logout của bạn
     }
@@ -295,7 +304,7 @@ window.handleAuthAction = function(btn) {
 
     handleLoginClick(btn); // Gửi sang C#
 };
-window.handleLogoutClick = function() {
+window.handleLogoutClick = function () {
     if (confirm("Thắng có chắc chắn muốn đăng xuất tài khoản thuế này không?")) {
 
         // 2. Gửi tin nhắn sang WinForms (C#)
@@ -312,7 +321,7 @@ window.handleLogoutClick = function() {
 
 // --- XỬ LÝ CHỌN NGÀY CHO ACCONLINE ---
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const dateFrom = document.getElementById('date-from');
     const dateTo = document.getElementById('date-to');
 
@@ -370,28 +379,29 @@ document.addEventListener('DOMContentLoaded', function() {
     dateTo.addEventListener('change', handleDateValidation);
 
     // Attach export button handlers
-    const btnXml = document.getElementById('btn-export-xml');
+    // NOTE: btn-export-xml dùng onclick trực tiếp trong HTML vì component được inject động
+    // (DOMContentLoaded chạy trước khi crawler_table.html được fetch và inject vào DOM)
     const btnPdf = document.getElementById('btn-export-pdf');
-    if (btnXml) btnXml.addEventListener('click', () => window.handleExportRequest('xml'));
+    // btn-export-pdf chưa có handler hoàn chỉnh, giữ nguyên
     if (btnPdf) btnPdf.addEventListener('click', () => window.handleExportRequest('pdf'));
 });
 
 // Hàm để C# bốc dữ liệu gửi sang Go
-window.getFilterParams = function() {
+window.getFilterParams = function () {
     return {
         fromDate: document.getElementById('date-from').value,
         toDate: document.getElementById('date-to').value
     };
 };
 // Open detail modal (ensure function exists before renderInvoices uses it)
-window.openDetailModal = function(inv) {
+window.openDetailModal = function (inv) {
     debugger;
     if (!inv) return;
     const id = 'invoiceDetailModal';
     const existing = document.getElementById(id);
     if (existing) existing.remove();
 
- 
+
     // Giả định hàm rawText đã được định nghĩa ở trên để giữ nguyên bản dữ liệu
 
     // Hàm giữ nguyên bản dữ liệu cào được
@@ -535,14 +545,26 @@ window.openDetailModal = function(inv) {
     document.body.insertAdjacentHTML('beforeend', finalHtml);
 
 };
-window.handleSearchClick = function() {
+window.handleSearchClick = function () {
+    // Disable nút search ngay để tránh click nhiều lần
+    const searchBtn = document.getElementById('btn-search');
+    if (searchBtn) {
+        if (searchBtn.disabled) return; // Đang search rồi, bỏ qua
+        searchBtn.disabled = true;
+        searchBtn.style.opacity = '0.6';
+        searchBtn.style.cursor = 'not-allowed';
+        searchBtn.innerHTML = '⏳ Đang tìm...';
+    }
+
     // 1. Lấy dữ liệu từ hàm bạn đã viết
     const params = window.getFilterParams();
 
     // 2. Kiểm tra nhanh (Double check lần cuối cho an toàn)
     if (!params.fromDate || !params.toDate) {
+        if (searchBtn) { searchBtn.disabled = false; searchBtn.style.opacity = '1'; searchBtn.style.cursor = 'pointer'; searchBtn.innerHTML = '🔍 Tìm kiếm'; }
         return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian!', 'warning');
     }
+
 
     // Normalize to ISO and validate using UTC days
     const toIso = v => {
@@ -560,7 +582,10 @@ window.handleSearchClick = function() {
     const startIso = toIso(params.fromDate);
     const endIso = toIso(params.toDate);
 
-    if (!startIso || !endIso) return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian!', 'warning');
+    if (!startIso || !endIso) {
+        if (window.finalizeSearchUI) window.finalizeSearchUI();
+        return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian!', 'warning');
+    }
 
     const start = new Date(startIso);
     const end = new Date(endIso);
@@ -569,8 +594,14 @@ window.handleSearchClick = function() {
     const utcEnd = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
     const diffDays = Math.floor((utcEnd - utcStart) / MS_PER_DAY);
 
-    if (diffDays < 0) return window.showAlert('Lỗi logic', 'Ngày kết thúc không được nhỏ hơn ngày bắt đầu!', 'error');
-    if (diffDays + 1 > 31) return window.showAlert('Giới hạn', 'Khoảng thời gian không được quá 31 ngày!', 'info');
+    if (diffDays < 0) {
+        if (window.finalizeSearchUI) window.finalizeSearchUI();
+        return window.showAlert('Lỗi logic', 'Ngày kết thúc không được nhỏ hơn ngày bắt đầu!', 'error');
+    }
+    if (diffDays + 1 > 31) {
+        if (window.finalizeSearchUI) window.finalizeSearchUI();
+        return window.showAlert('Giới hạn', 'Khoảng thời gian không được quá 31 ngày!', 'info');
+    }
 
     // 3. Gửi sang C# (WinForms) để báo cho Backend Go bắt đầu Crawl
     if (window.chrome && window.chrome.webview) {
@@ -585,32 +616,26 @@ window.handleSearchClick = function() {
         // Có thể thêm hiệu ứng đổi text nút hoặc loading ở đây nếu muốn
         console.log("AccOnline: Đã gửi yêu cầu tra cứu từ " + params.fromDate + " đến " + params.toDate);
 
-        // Disable search button + start watchdog in case SSE or final event not received
-        const searchBtn = document.getElementById('btn-search');
-        if (searchBtn) {
-            if (!searchBtn.dataset.origText) searchBtn.dataset.origText = searchBtn.innerText;
-            searchBtn.disabled = true;
-            searchBtn.innerText = 'Đang xử lý...';
-        }
-
-        // clear previous watchdog
+        // Watchdog: tự động finalize UI sau 35s nếu không nhận được IsDone signal
         if (window._searchWatchdogId) {
             clearTimeout(window._searchWatchdogId);
             window._searchWatchdogId = null;
         }
-        // default 35s watchdog to auto-finalize UI
         const wd = window._searchWatchdogDuration || 35000;
         window._searchWatchdogId = setTimeout(() => {
             console.warn('Search watchdog triggered — finalizing UI');
             if (window.finalizeSearchUI) window.finalizeSearchUI();
         }, wd);
     } else {
+        // Nếu không có WebView2, re-enable lại button
+        if (window.finalizeSearchUI) window.finalizeSearchUI();
         window.showAlert('Lỗi', 'Không tìm thấy kết nối ứng dụng (WebView2)!', 'error');
     }
 };
 
+
 // Export / Download handlers for XML and PDF
-window.handleExportRequest = function(type) {
+window.handleExportRequest = function (type) {
     // type: 'xml' | 'pdf'
     const params = window.getFilterParams();
     const selectCompany = document.getElementById('select-company');
@@ -740,7 +765,7 @@ function renderInvoices(invoices) {
                     </svg>
                 </button>
             </td>
-        `;  
+        `;
 
         // Attach click handlers: button stops propagation so only one handler fires
         const viewBtn = row.querySelector('.btn-view');
@@ -779,7 +804,7 @@ window._invoiceCache = null;
 window._pageSize = 20;
 
 // Store invoices for client-side paging and show first page
-window.paginateClient = function(invoices, pageSize = 20) {
+window.paginateClient = function (invoices, pageSize = 20) {
     if (!Array.isArray(invoices)) return;
     window._invoiceCache = invoices;
     window._pageSize = pageSize || 20;
@@ -787,7 +812,7 @@ window.paginateClient = function(invoices, pageSize = 20) {
 };
 
 // Show a specific page from cached invoices
-window.showPage = function(page) {
+window.showPage = function (page) {
     if (!window._invoiceCache || window._invoiceCache.length === 0) return;
     const total = window._invoiceCache.length;
     const pageSize = window._pageSize || 20;
@@ -805,7 +830,7 @@ window.showPage = function(page) {
 };
 
 // Pagination helper: accepts total items, current page, page size
-window.renderPagination = function(totalItems, currentPage, pageSize) {
+window.renderPagination = function (totalItems, currentPage, pageSize) {
     const container = document.getElementById('crawler-pagination');
     const info = document.getElementById('crawler-pagination-info');
     if (!container) return;
@@ -903,163 +928,264 @@ function getStatusStyle(status) {
     if (s.includes("gốc") || s.includes("mới")) return "bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200";
     return "bg-slate-50 text-slate-500 ring-1 ring-slate-200";
 }
-window.updateCrawlerStatus = function(data) {
-    const statusBox = document.getElementById('crawler-status-box');
-    const statusText = document.getElementById('crawler-current-status');
-    const subDetail = document.getElementById('crawler-sub-detail');
-    const spinner = document.getElementById('crawler-spinner');
+window.updateCrawlerStatus = function (data) {
 
-    if (!statusBox) return;
+    // Dùng #crawl-progress-modal (dialog giữa màn hình) thay vì #crawler-status-box đã ẩn
+    const modal = document.getElementById('crawl-progress-modal');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdCount = document.getElementById('cpd-count');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdDone = document.getElementById('cpd-icon-done');
+    const cpdError = document.getElementById('cpd-icon-error');
+    if (!modal) return;
 
-    // LẤY DỮ LIỆU
-    const status = data.status || data.Status || "";
-    const isDone = (data.is_done !== undefined) ? data.is_done : data.IsDone;
+    const status = data.status || data.Status || '';
+    const isDone = (data.is_done !== undefined) ? data.is_done : (data.IsDone || false);
     const total = data.total_on_tax || data.TotalOnTax || 0;
+    const isError = status.includes('❌') || status.toLowerCase().includes('lỗi') || status.toLowerCase().includes('timeout');
 
-    // ÉP HIỂN THỊ
-    statusBox.style.setProperty('display', 'flex', 'important');
-    void statusBox.offsetHeight; // Thủ thuật ép trình duyệt Reflow (vẽ lại ngay lập tức)
+    // Hiển thị modal
+    modal.style.display = 'flex';
+    modal.style.opacity = '1';
+    modal.style.transition = '';
 
-    statusText.innerText = status;
-    if (subDetail && total > 0) {
-        subDetail.innerText = `Tìm thấy tổng cộng ${total} hóa đơn.`;
+    if (cpdTitle) {
+        cpdTitle.innerText = isError ? 'Lỗi tìm kiếm' : isDone ? 'Tìm kiếm hoàn tất!' : 'Đang tìm kiếm hóa đơn...';
+        cpdTitle.style.color = isError ? '#dc2626' : isDone ? '#059669' : '#0f172a';
     }
+    if (cpdSubtitle) {
+        cpdSubtitle.innerText = isError
+            ? 'Kiểm tra lại ngày và thử lại'
+            : isDone ? 'Kết quả đã được hiển thị bên dưới'
+                : 'Vui lòng không đóng cửa sổ';
+    }
+    if (cpdStatus) {
+        cpdStatus.innerText = status;
+        cpdStatus.style.color = isError ? '#dc2626' : '#1e293b';
+    }
+    if (cpdSub && total > 0) {
+        cpdSub.innerText = `Tìm thấy tổng cộng ${total} hóa đơn`;
+    }
+    if (cpdCount) cpdCount.innerText = total || 0;
+    if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';
+    if (cpdDone) cpdDone.style.display = isDone ? 'flex' : 'none';
+    if (cpdError) cpdError.style.display = isError ? 'flex' : 'none';
 
-    if (isDone) {
-        if (spinner) spinner.style.display = 'none';
-        statusText.classList.add('text-emerald-600');
-        statusText.innerText = "✅ " + status;
-
-        // Giữ lại 10 giây để bạn kiểm tra
+    // Tự ẩn sau khi xong
+    if (isDone || isError) {
         setTimeout(() => {
-            statusBox.style.setProperty('display', 'none', 'important');
-        }, 10000);
-    } else {
-        if (spinner) spinner.style.display = 'block';
-        statusText.classList.remove('text-emerald-600');
-    }
-};
-const UI = {
-    // Hàm bật/tắt hộp trạng thái bay ở giữa màn hình
-    showLoading: (status, detail) => {
-        const box = document.getElementById('crawler-status-box');
-        const statusEl = document.getElementById('crawler-current-status');
-        const detailEl = document.getElementById('crawler-sub-detail');
-
-        if (box) box.classList.remove('hidden'); // Hiện hộp
-        if (statusEl) statusEl.innerText = status || "Đang xử lý...";
-        if (detailEl) detailEl.innerText = detail || "Vui lòng đợi trong giây lát";
-    },
-
-    hideLoading: () => {
-        const box = document.getElementById('crawler-status-box');
-        if (box) box.classList.add('hidden'); // Ẩn hộp
-    },
-
-    // Hàm làm cho nút bấm "đang tải"
-    setButtonLoading: (btnId, isLoading) => {
-        const btn = document.getElementById(btnId);
-        if (!btn) return;
-
-        if (isLoading) {
-            btn.disabled = true;
-            btn.dataset.oldHtml = btn.innerHTML; // Lưu lại chữ cũ (ví dụ: "XML-HTML")
-            btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Đang chạy...`;
-        } else {
-            btn.disabled = false;
-            btn.innerHTML = btn.dataset.oldHtml || btn.innerHTML;
-        }
+            modal.style.transition = 'opacity 0.35s ease';
+            modal.style.opacity = '0';
+            setTimeout(() => {
+                modal.style.display = 'none';
+                modal.style.opacity = '1';
+                modal.style.transition = '';
+            }, 380);
+        }, isDone ? 3000 : 5000);
     }
 };
 /**
  * Hàm xử lý xuất XML và Cào dữ liệu hóa đơn.
  * Quy trình: Chọn thư mục -> Gửi lệnh Cào -> Chờ phản hồi từ C# (Backend) -> Hoàn tất.
- * @param {HTMLElement} btn -Nút bấm được click để điều khiển trạng thái UI.
-             */
+ * @param {HTMLElement} btn - Nút bấm được click để điều khiển trạng thái UI.
+ */
 async function handleExportXml(btn) {
-     debugger;
     const originalContent = btn.innerHTML;
-    const outputDir = "C:\\Downloads"; 
 
-    // 1. Cập nhật trạng thái UI ban đầu (Loading)
-    btn.disabled = true;
-    btn.innerHTML = `<span class="text-sm">⏳</span> Đang cào...`;
+    // --- HELPER: Điều khiển dialog tiến độ #crawl-progress-modal ---
+    const modal = document.getElementById('crawl-progress-modal');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdCount = document.getElementById('cpd-count');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdDone = document.getElementById('cpd-icon-done');
+    const cpdError = document.getElementById('cpd-icon-error');
 
-    // Kiểm tra môi trường WebView2 (tránh lỗi trên trình duyệt thường)
+    function showProgress(status, subDetail = '', isDone = false, isError = false) {
+        if (!modal) return;
+        modal.style.display = 'flex';
+        if (cpdStatus) {
+            cpdStatus.innerText = status || '';
+            cpdStatus.style.color = isError ? '#dc2626' : isDone ? '#059669' : '#1e293b';
+        }
+        if (cpdSub) cpdSub.innerText = subDetail || '';
+        if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';
+        if (cpdDone) cpdDone.style.display = isDone ? 'flex' : 'none';
+        if (cpdError) cpdError.style.display = isError ? 'flex' : 'none';
+        if (cpdTitle) {
+            cpdTitle.innerText = isError ? 'Có lỗi xảy ra' : isDone ? 'Tải hoàn tất! 🎉' : 'Đang tải hóa đơn...';
+            cpdTitle.style.color = isError ? '#dc2626' : isDone ? '#059669' : '#0f172a';
+        }
+        if (cpdSubtitle) {
+            cpdSubtitle.innerText = isError
+                ? 'Kiểm tra lại và thử lại'
+                : isDone ? 'File XML đã được lưu vào thư mục'
+                    : 'Vui lòng không đóng cửa sổ';
+        }
+    }
+
+    function setProgressFolder(folderPath) {
+        const wrap = document.getElementById('cpd-folder-wrap');
+        const folder = document.getElementById('cpd-folder');
+        if (wrap && folder && folderPath) {
+            folder.innerText = folderPath;
+            wrap.style.display = 'block';
+        }
+    }
+
+    function setProgressCount(n) {
+        if (cpdCount) cpdCount.innerText = n || 0;
+    }
+
+    function hideProgress(delayMs = 0) {
+        if (!modal) return;
+        setTimeout(() => {
+            modal.style.transition = 'opacity 0.35s ease';
+            modal.style.opacity = '0';
+            setTimeout(() => {
+                modal.style.display = 'none';
+                modal.style.opacity = '1';
+                modal.style.transition = '';
+            }, 380);
+        }, delayMs);
+    }
+
+    // --- END HELPER ---
+
+    // 1. Kiểm tra môi trường WebView2
     if (!(window.chrome?.webview)) {
-        console.error("WebView2 chưa sẵn sàng!");
-        btn.disabled = false;
-        btn.innerHTML = originalContent;
+        window.showAlert?.('Lỗi', 'WebView2 chưa sẵn sàng!', 'error');
         return;
     }
 
+    // 2. Khóa nút + hiện tiến độ ban đầu
+    btn.disabled = true;
+    btn.innerHTML = `<span class="text-sm">⏳</span> Đang chuẩn bị...`;
+    showProgress('Đang chờ chọn thư mục lưu...', 'Vui lòng chọn thư mục trong hộp thoại vừa mở.');
+
+    // 3. Khởi tạo requestId
     const requestId = Math.random().toString(36).slice(2);
     window._pendingWebviewRequests = window._pendingWebviewRequests || {};
 
-    // 3. Tạo một Promise để bao bọc toàn bộ quá trình giao tiếp bất đồng bộ
+    // 4. Promise bao bọc toàn bộ luồng bất đồng bộ
     const promise = new Promise((resolve, reject) => {
-        // Thiết lập Timeout sau 60s để tránh treo UI nếu Backend không phản hồi
+        // Timeout 5 phút (crawl nhiều hóa đơn có thể lâu)
         const timer = setTimeout(() => {
             try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
-            reject(new Error("Timeout chờ phản hồi từ host (60 giây)"));
-        }, 60000);
+            reject(new Error('Timeout — quá trình tải quá lâu (5 phút)'));
+        }, 5 * 60 * 1000);
 
-        /**
-         * Định nghĩa hàm xử lý phản hồi dành riêng cho requestId này.
-         * Hàm này sẽ được gọi nhiều lần bởi "Trạm điều phối trung tâm" khi BE gửi tin nhắn lên.
-         */
-     window._pendingWebviewRequests[requestId] = (payload) => {
-            const action = payload && payload.action;
+        window._pendingWebviewRequests[requestId] = (payload) => {
+            try {
+                const action = payload && payload.action;
 
-            switch (action) {
-                case 'OUTPUT_DIR_SELECTED':
-                    // Khi đã chọn folder xong, bắt đầu hiện xoay xoay
-                    UI.showLoading("Đang chuẩn bị...", "Đang khởi tạo trình duyệt ẩn...");
-                    UI.setButtonLoading('btn-export-xml', true);
-            
-                    window.chrome.webview.postMessage({ 
-                        action: 'START_CRAWL', 
-                        output_dir: payload.output_dir, 
-                        requestId 
+                // Bước 1: Người dùng đã chọn thư mục, Backend bắt đầu nhận lệnh
+                if (action === 'OUTPUT_DIR_SELECTED') {
+                    const out = payload.output_dir || payload.outputDir || '';
+                    if (!out) {
+                        clearTimeout(timer);
+                        try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                        reject(new Error('Người dùng đã hủy chọn thư mục'));
+                        return;
+                    }
+                    showProgress(
+                        'Đã chọn thư mục, đang gửi lệnh...',
+                        'Bot sẽ bắt đầu từ trang 1 sau khi nhận được lệnh...'
+                    );
+                    setProgressFolder(out);
+                    btn.innerHTML = `<span class="text-sm">⏳</span> Đang gửi lệnh...`;
+
+                    window.chrome.webview.postMessage({
+                        action: 'START_CRAWL',
+                        output_dir: out,
+                        requestId
                     });
-                    break;
+                    return;
+                }
 
-                case 'CRAWL_STATUS_UPDATE':
-                    // Cập nhật chữ trong lúc đang chạy
-                    UI.showLoading(payload.status, payload.detail);
-                    break;
+                // Bước 2: Backend xác nhận đã nhận và bắt đầu chạy
+                if (action === 'START_CRAWL_ACK') {
+                    showProgress(
+                        'Bot đang bắt đầu tải hóa đơn...',
+                        'Đang mở từng hóa đơn và tải file ZIP về...'
+                    );
+                    btn.innerHTML = `<span class="text-sm">⏳</span> Đang tải...`;
+                    return;
+                }
 
-                case 'CRAWL_ERROR':
-                    UI.hideLoading();
-                    UI.setButtonLoading('btn-export-xml', false);
-                    alert("Lỗi: " + payload.message);
-                    break;
+                // Bước 3: Cập nhật tiến độ thực tế từ polling (C# gửi mỗi 1 giây)
+                if (action === 'CRAWL_STATUS_UPDATE') {
+                    const st = payload.status || payload.Status || '';
+                    const total = payload.total_invoices || payload.TotalInvoices || 0;
+                    const sub = total > 0 ? `Đã xử lý được ${total} hóa đơn` : 'Bot đang khởi động...';
+                    showProgress(st, sub);
+                    setProgressCount(total);
+                    btn.innerHTML = `<span class="text-sm">⏳</span> ${total > 0 ? total + ' HĐ' : 'Đang tải...'}`;
+                    return;
+                }
 
-                case 'CRAWL_FINISHED':
-                    UI.hideLoading();
-                    UI.setButtonLoading('btn-export-xml', false);
-                    // Có thể hiện thông báo thành công ở đây
-                    break;
+                // Bước 4: Lỗi trong quá trình xử lý
+                if (action === 'CRAWL_ERROR') {
+                    clearTimeout(timer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    const msg = payload.message || payload.Message || 'Lỗi không xác định';
+                    showProgress(msg, 'Kiểm tra log để biết thêm chi tiết', false, true);
+                    hideProgress(6000);
+                    reject(new Error(msg));
+                    return;
+                }
+
+                // Bước 5: Hoàn tất thành công
+                if (action === 'CRAWL_FINISHED') {
+                    clearTimeout(timer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    resolve(payload);
+                    return;
+                }
+
+                // Fallback
+                if (payload && (payload.result || payload.status === 'done')) {
+                    clearTimeout(timer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    resolve(payload);
+                }
+
+            } catch (ex) {
+                clearTimeout(timer);
+                try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                reject(ex);
             }
         };
     });
 
-    // 4. Kích hoạt quy trình: Yêu cầu Backend mở hộp thoại chọn thư mục lưu file
+    // 5. Kích hoạt: mở hộp thoại chọn thư mục
     window.chrome.webview.postMessage({
-        action: "REQUEST_SELECT_OUTPUT_DIR",
+        action: 'REQUEST_SELECT_OUTPUT_DIR',
         requestId
     });
 
-    // 5. Chờ đợi kết quả từ Promise và xử lý thông báo cuối cùng
+    // 6. Chờ kết quả
     try {
-        const result = await promise; // Chờ cho đến khi resolve() được gọi bên trong callback
-        alert(result?.message || "Hoàn tất xuất XML");
+        const result = await promise;
+        const total = result?.total_invoices || result?.TotalInvoices || '';
+        const msg = total ? `Đã tải xong ${total} hóa đơn!` : 'Hoàn tất xuất XML!';
+        showProgress(msg, 'File XML đã được lưu vào thư mục bạn chọn.', true);
+        // Tự đóng status box sau 5 giây
+        setTimeout(hideProgress, 5000);
+        window.showAlert?.('Thành công', msg, 'success');
     } catch (err) {
-        console.error("Export failed:", err);
-        alert("Lỗi khi xuất: " + (err.message || "Không xác định"));
+        console.error('Export XML failed:', err);
+        const errMsg = err.message || 'Không xác định';
+        showProgress('Quá trình tải thất bại', errMsg, false, true);
+        setTimeout(hideProgress, 6000);
+        window.showAlert?.('Lỗi xuất XML', errMsg, 'error');
     } finally {
-        // Luôn khôi phục trạng thái nút bấm dù thành công hay thất bại
         btn.disabled = false;
         btn.innerHTML = originalContent;
     }
-} 
+}

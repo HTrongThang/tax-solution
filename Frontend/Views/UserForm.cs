@@ -1,4 +1,4 @@
-﻿using Frontend.Models;
+using Frontend.Models;
 using Frontend.Services;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
@@ -560,16 +560,8 @@ namespace Frontend.Views
         }
         private async Task HandleInvoiceSearchStream(string from, string to, CancellationToken cancellationToken = default)
         {
-            string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "debug_log.txt");
-
             try
             {
-                // Khởi tạo log
-                File.WriteAllText(logPath, $"--- BẮT ĐẦU: {DateTime.Now} ---\n");
-
-                // Khóa nút trên giao diện Web
-                await webViewUser.CoreWebView2.ExecuteScriptAsync("if(document.getElementById('btn-search')) document.getElementById('btn-search').disabled = true;");
-
                 await _taxService.SearchInvoicesSSE(from, to, (progressData) =>
                 {
                     // Marshal to UI thread and run async work safely
@@ -579,53 +571,25 @@ namespace Frontend.Views
                         {
                             try
                             {
-                                // 1. Ghi log (Chạy ngầm để không chậm UI)
-                                string logEntry = $"[{DateTime.Now:HH:mm:ss}] {progressData.Status} | Done: {progressData.IsDone}\n";
-                                File.AppendAllText(logPath, logEntry);
-
-                                // 2. Chuyển đổi dữ liệu sang JSON
-                                string jsonStatus = JsonConvert.SerializeObject(progressData, Formatting.None);
-
-                                // 3. Xử lý logic hiển thị
-                                // Send progress via PostWebMessageAsJson to reduce ExecuteScript calls
-                                try
+                                // Gửi progress qua PostWebMessageAsJson (ít overhead hơn ExecuteScript)
+                                var wrapper = new { action = "sse_progress", data = progressData };
+                                var wrapperJson = JsonConvert.SerializeObject(wrapper);
+                                this.BeginInvoke((Action)(() =>
                                 {
-                                    var wrapper = new { action = "sse_progress", data = progressData };
-                                    var wrapperJson = JsonConvert.SerializeObject(wrapper);
-                                    // Post message on UI thread
-                                    this.BeginInvoke((Action)(() =>
-                                    {
-                                        try
-                                        {
-                                            webViewUser.CoreWebView2.PostWebMessageAsJson(wrapperJson);
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            File.AppendAllText(logPath, $"POST MESSAGE ERROR: {ex.Message}\n");
-                                        }
-                                    }));
-                                    // Fallback: if final chunk contains invoices, also call renderInvoices via ExecuteScript to ensure UI update
-                                    if (progressData.IsDone && progressData.Invoices != null && progressData.Invoices.Count > 0)
-                                    {
-                                        try
-                                        {
-                                            string jsonData = JsonConvert.SerializeObject(progressData.Invoices, Formatting.None);
-                                            await ExecuteScriptSerializedAsync($"renderInvoices({jsonData})");
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            File.AppendAllText(logPath, $"FALLBACK RENDER ERROR: {ex.Message}\n");
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
+                                    try { webViewUser.CoreWebView2.PostWebMessageAsJson(wrapperJson); }
+                                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine("PostWebMessage error: " + ex.Message); }
+                                }));
+
+                                // Fallback: nếu chunk cuối có hóa đơn, render ngay qua ExecuteScript
+                                if (progressData.IsDone && progressData.Invoices != null && progressData.Invoices.Count > 0)
                                 {
-                                    File.AppendAllText(logPath, $"SERIALIZE ERROR: {ex.Message}\n");
+                                    string jsonData = JsonConvert.SerializeObject(progressData.Invoices, Formatting.None);
+                                    await ExecuteScriptSerializedAsync($"renderInvoices({jsonData})");
                                 }
                             }
                             catch (Exception ex)
                             {
-                                File.AppendAllText(logPath, $"HANDLER ERROR: {ex.Message}\n");
+                                System.Diagnostics.Debug.WriteLine("SSE handler error: " + ex.Message);
                             }
                         });
                     }));
@@ -633,10 +597,12 @@ namespace Frontend.Views
             }
             catch (Exception ex)
             {
-                File.AppendAllText(logPath, $"LỖI: {ex.Message}\n");
-                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi hệ thống', '{ex.Message}', 'error')");
+                // Escape message để tránh XSS/syntax error khi nhúng vào JS string
+                var safeMsg = JsonConvert.ToString(ex.Message);
+                await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Lỗi hệ thống', {safeMsg}, 'error')");
             }
         }
+
 
         private async Task HandleStartCrawl(string path, string requestId = null)
         {
@@ -670,6 +636,7 @@ namespace Frontend.Views
                             action = "CRAWL_STATUS_UPDATE",
                             status = statusInfo.current_status,
                             is_running = statusInfo.is_running,
+                            total_invoices = statusInfo.total_invoices,
                             requestId = _currentCrawlRequestId
                         });
 

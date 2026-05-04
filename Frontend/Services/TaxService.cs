@@ -1,4 +1,4 @@
-﻿using Frontend.Models;
+using Frontend.Models;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -149,6 +149,16 @@ namespace Frontend.Services
                 var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}";
                 using (var response = await _client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
                 {
+                    // Xử lý riêng 409 Conflict (hệ thống đang bận)
+                    if ((int)response.StatusCode == 409)
+                    {
+                        onProgress?.Invoke(new StreamData
+                        {
+                            Status = "⚠️ Hệ thống đang bận xử lý tác vụ khác. Vui lòng đợi hoàn thành trước.",
+                            IsDone = true
+                        });
+                        return;
+                    }
                     response.EnsureSuccessStatusCode();
 
                     using (var stream = await response.Content.ReadAsStreamAsync())

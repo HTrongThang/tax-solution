@@ -3,19 +3,17 @@
         <div class="flex items-center justify-between gap-4 pb-3 border-b border-slate-100">
             <div class="flex items-center gap-2 flex-1">
                 <div class="bg-slate-100 p-2 rounded-lg text-slate-500">🏢</div>
-                <select id="select-company"
-                        class="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer hover:text-emerald-600 transition-colors
+                <select id="select-company" class="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer hover:text-emerald-600 transition-colors
                      max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap">
                     <option value="">Đang tải danh sách...</option>
                 </select>
-                <button id="btn-auth"
-                        onclick="handleAuthAction(this)"
-                        class="ml-2 text-[10px] font-bold px-3 py-1 rounded-md transition-all uppercase active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white">
+                <button id="btn-auth" onclick="handleAuthAction(this)"
+                    class="ml-2 text-[10px] font-bold px-3 py-1 rounded-md transition-all uppercase active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white">
                     Đăng nhập
                 </button>
 
             </div>
-          
+
         </div>
 
 
@@ -23,7 +21,8 @@
             <div class="flex items-center gap-3">
                 <div class="flex items-center gap-2 bg-slate-50 px-2 py-1.5 rounded-xl border border-slate-100">
                     <span class="text-[10px] font-bold text-slate-400 uppercase pl-1">Kỳ:</span>
-                    <select id="select-period" class="bg-transparent text-[11px] font-bold text-slate-700 outline-none cursor-pointer hover:text-emerald-600 transition-colors">
+                    <select id="select-period"
+                        class="bg-transparent text-[11px] font-bold text-slate-700 outline-none cursor-pointer hover:text-emerald-600 transition-colors">
                         <!--<option value="this-month">Tháng này</option>
                         <option value="01">Tháng 01</option>
                         <option value="02">Tháng 02</option>
@@ -47,47 +46,43 @@
                 <div class="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
                     <!-- hidden native ISO date inputs for reliable parsing -->
                     <input type="date" id="date-from-iso" value="2026-04-01" max="2026-04-15" class="hidden">
-                    <input type="text"
-                           id="date-from"
-                           value="01/01/2026"
-                           placeholder="dd/mm/yyyy"
-                           class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
+                    <input type="text" id="date-from" value="01/01/2026" placeholder="dd/mm/yyyy"
+                        class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
 
                     <span class="text-slate-300">→</span>
 
                     <input type="date" id="date-to-iso" value="2026-04-13" max="2026-04-15" class="hidden">
-                    <input type="text"
-                           id="date-to"
-                           value="07/01/2026"
-                           placeholder="dd/mm/yyyy"
-                           class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
+                    <input type="text" id="date-to" value="07/01/2026" placeholder="dd/mm/yyyy"
+                        class="bg-transparent text-[11px] font-mono outline-none text-slate-600 w-[95px] cursor-pointer">
                 </div>
             </div>
 
             <div class="flex items-center gap-1 bg-slate-50/80 p-1 rounded-2xl border border-slate-100">
-                <button onclick="handleSearchClick()"
-                        class="bg-slate-900 text-white px-4 py-2 rounded-xl text-[11px] font-bold hover:bg-emerald-600 transition-all flex items-center gap-2 uppercase shadow-sm active:scale-95">
+                <button id="btn-search" onclick="handleSearchClick()"
+                    class="bg-slate-900 text-white px-4 py-2 rounded-xl text-[11px] font-bold hover:bg-emerald-600 transition-all flex items-center gap-2 uppercase shadow-sm active:scale-95">
                     🔍 Tìm kiếm
                 </button>
 
                 <div class="w-[1px] h-6 bg-slate-200 mx-1"></div>
 
-                <button id="btn-export-xml"
-                        onclick="handleExportXml(this)"
-                        class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
+                <button id="btn-export-xml" onclick="handleExportXml(this)"
+                    class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-blue-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
                     <span class="text-sm">📄</span> XML-HTML
                 </button>
 
-                <button id="btn-export-pdf" class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-red-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
+                <button id="btn-export-pdf"
+                    class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-red-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
                     <span class="text-sm">📕</span> PDF GỐC
                 </button>
 
-                <button class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-emerald-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
+                <button
+                    class="px-2 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-white hover:text-emerald-600 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
                     <span class="text-sm">📗</span> EXCEL
                     <span class="text-[8px] opacity-50 ml-0.5">▼</span>
                 </button>
 
-                <button class="px-2 py-1.5 text-[10px] font-bold text-slate-500 hover:bg-white hover:text-slate-900 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
+                <button
+                    class="px-2 py-1.5 text-[10px] font-bold text-slate-500 hover:bg-white hover:text-slate-900 rounded-lg transition-all flex items-center gap-1.5 border border-transparent hover:border-slate-200">
                     <span class="text-sm">⚖️</span> ĐỐI CHIẾU
                     <span class="text-[8px] opacity-50 ml-0.5">▼</span>
                 </button>
@@ -103,8 +98,10 @@
                         <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 w-12 text-center">STT</th>
                         <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500">Mã số thuế / Ký hiệu</th>
                         <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500">Số hóa đơn / Ngày</th>
-                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-right">Giá trị thanh toán</th>
-                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-center">Kiểm tra thuế</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-right">Giá trị thanh
+                            toán</th>
+                        <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-center">Kiểm tra thuế
+                        </th>
                         <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 text-center">Trạng thái</th>
                         <th class="py-4 px-4 text-[10px] font-bold uppercase text-slate-500 w-10"></th>
                     </tr>
@@ -120,7 +117,8 @@
     </div>
 </div>
 
-<div id="captcha-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center">
+<div id="captcha-modal"
+    class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden flex items-center justify-center">
     <div class="bg-white p-6 rounded-2xl shadow-2xl w-[350px] border border-slate-200">
         <h3 class="text-red-600 font-bold text-center uppercase text-sm mb-4">Nhập mã captcha xác thực</h3>
 
@@ -129,23 +127,134 @@
         </div>
 
         <input type="text" id="input-captcha" placeholder="Mã xác nhận" autocomplete="off"
-               class="w-full border-b-2 border-slate-200 outline-none focus:border-emerald-500 text-center text-xl font-mono tracking-widest py-2 mb-6 uppercase">
+            class="w-full border-b-2 border-slate-200 outline-none focus:border-emerald-500 text-center text-xl font-mono tracking-widest py-2 mb-6 uppercase">
 
         <div class="flex gap-2">
-            <button onclick="closeCaptcha()" class="flex-1 py-2 rounded-xl bg-slate-100 text-slate-600 font-bold text-[11px] uppercase hover:bg-slate-200">Hủy</button>
-            <button onclick="submitCaptcha()" class="flex-1 py-2 rounded-xl bg-slate-900 text-white font-bold text-[11px] uppercase hover:bg-emerald-600">Xác nhận</button>
+            <button onclick="closeCaptcha()"
+                class="flex-1 py-2 rounded-xl bg-slate-100 text-slate-600 font-bold text-[11px] uppercase hover:bg-slate-200">Hủy</button>
+            <button onclick="submitCaptcha()"
+                class="flex-1 py-2 rounded-xl bg-slate-900 text-white font-bold text-[11px] uppercase hover:bg-emerald-600">Xác
+                nhận</button>
         </div>
     </div>
 </div>
 
-<div id="crawler-status-box"
-     style="display: none !important; position: fixed; top: 100px; left: 50%; transform: translateX(-50%); z-index: 2147483647; width: 350px; pointer-events: none;"
-     class="bg-white p-4 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] border border-emerald-100 flex items-center gap-4">
+<!-- =============================================
+     CRAWL PROGRESS DIALOG — hiển thị ở giữa màn hình
+     Điều khiển bởi showProgress() / hideProgress() trong crawlerTable.js
+     ============================================= -->
+<div id="crawl-progress-modal" style="display:none; position:fixed; inset:0; z-index:99999;
+            background:rgba(15,23,42,0.65); backdrop-filter:blur(6px);
+            align-items:center; justify-content:center;">
 
-    <div id="crawler-spinner" class="w-6 h-6 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin flex-shrink-0"></div>
+    <div style="background:#ffffff; border-radius:24px; padding:36px 32px 28px;
+                width:440px; max-width:92vw;
+                box-shadow:0 30px 80px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.1);
+                position:relative; overflow:hidden;">
 
-    <div class="flex flex-col min-w-0">
-        <span id="crawler-current-status" class="text-sm font-bold text-slate-800 leading-tight">Đang chuẩn bị...</span>
-        <span id="crawler-sub-detail" class="text-[10px] text-slate-400 mt-1 truncate">Đang kết nối hệ thống thuế...</span>
+        <!-- Decorative gradient strip at top -->
+        <div style="position:absolute; top:0; left:0; right:0; height:4px;
+                    background:linear-gradient(90deg,#10b981,#06b6d4,#8b5cf6);
+                    border-radius:24px 24px 0 0;"></div>
+
+        <!-- Header row: icon + title -->
+        <div style="display:flex; align-items:center; gap:16px; margin-bottom:28px;">
+
+            <!-- Animated spinner ring -->
+            <div id="cpd-spinner-wrap" style="position:relative; width:56px; height:56px; flex-shrink:0;">
+                <svg id="cpd-spinner-svg" style="width:56px;height:56px;animation:cpdSpin 1s linear infinite;"
+                    viewBox="0 0 56 56">
+                    <circle cx="28" cy="28" r="24" fill="none" stroke="#e2e8f0" stroke-width="4" />
+                    <circle cx="28" cy="28" r="24" fill="none" stroke="#10b981" stroke-width="4" stroke-linecap="round"
+                        stroke-dasharray="37.7 113.1" style="transform-origin:center; transform:rotate(-90deg);" />
+                </svg>
+                <!-- Done checkmark (hidden by default) -->
+                <div id="cpd-icon-done" style="display:none; position:absolute; inset:0;
+                     align-items:center; justify-content:center;
+                     background:#ecfdf5; border-radius:50%; font-size:28px;">✅</div>
+                <!-- Error icon (hidden by default) -->
+                <div id="cpd-icon-error" style="display:none; position:absolute; inset:0;
+                     align-items:center; justify-content:center;
+                     background:#fef2f2; border-radius:50%; font-size:28px;">❌</div>
+            </div>
+
+            <div>
+                <div id="cpd-title" style="font-size:1.125rem; font-weight:800; color:#0f172a; letter-spacing:-0.01em;">
+                    Đang tải hóa đơn...
+                </div>
+                <div id="cpd-subtitle" style="font-size:0.75rem; color:#94a3b8; margin-top:3px;">
+                    Vui lòng không đóng cửa sổ
+                </div>
+            </div>
+        </div>
+
+        <!-- Status card -->
+        <div style="background:#f8fafc; border-radius:14px; padding:16px 18px; margin-bottom:16px;
+                    border:1px solid #e2e8f0;">
+            <div id="cpd-status" style="font-size:0.875rem; font-weight:700; color:#1e293b; line-height:1.4;">
+                Đang chuẩn bị...
+            </div>
+            <div id="cpd-sub" style="font-size:0.75rem; color:#64748b; margin-top:5px; line-height:1.4;
+                        word-break:break-all;">
+            </div>
+        </div>
+
+        <!-- Invoice counter -->
+        <div style="display:flex; align-items:center; justify-content:space-between;
+                    padding:14px 18px;
+                    background:linear-gradient(135deg,#ecfdf5 0%,#f0fdf4 100%);
+                    border-radius:14px; border:1px solid #bbf7d0; margin-bottom:14px;">
+            <div>
+                <div style="font-size:0.7rem; color:#059669; font-weight:600; text-transform:uppercase;
+                            letter-spacing:0.05em;">Hóa đơn đã tải</div>
+                <div style="font-size:0.65rem; color:#6ee7b7; margin-top:1px;">Cập nhật mỗi giây</div>
+            </div>
+            <div style="display:flex; align-items:baseline; gap:4px;">
+                <span id="cpd-count" style="font-size:2rem; font-weight:900; color:#059669;
+                             line-height:1; font-variant-numeric:tabular-nums;">0</span>
+                <span style="font-size:0.75rem; color:#34d399; font-weight:600;">HĐ</span>
+            </div>
+        </div>
+
+        <!-- Folder path (hidden until folder selected) -->
+        <div id="cpd-folder-wrap" style="display:none; padding:10px 14px;
+                    background:#f1f5f9; border-radius:10px;
+                    border:1px solid #e2e8f0; margin-bottom:14px;">
+            <div style="font-size:0.65rem; color:#94a3b8; font-weight:600;
+                        text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px;">
+                📁 Thư mục lưu
+            </div>
+            <div id="cpd-folder" style="font-size:0.75rem; color:#475569; font-weight:500;
+                        word-break:break-all; line-height:1.4;"></div>
+        </div>
+
+        <!-- Bottom note -->
+        <div style="text-align:center;">
+            <span style="font-size:0.7rem; color:#cbd5e1;">
+                ⚡ Bot đang tự động xử lý — kết quả sẽ lưu vào thư mục đã chọn
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- Spinner keyframe (chỉ cần 1 lần trong component) -->
+<style>
+    @keyframes cpdSpin {
+        from {
+            transform: rotate(0deg);
+        }
+
+        to {
+            transform: rotate(360deg);
+        }
+    }
+</style>
+
+<!-- Giữ lại crawler-status-box (dùng bởi updateCrawlerStatus khi search) nhưng ẩn đi -->
+<div id="crawler-status-box" style="display:none !important;" hidden>
+    <div id="crawler-spinner"></div>
+    <div>
+        <span id="crawler-current-status"></span>
+        <span id="crawler-sub-detail"></span>
     </div>
 </div>
