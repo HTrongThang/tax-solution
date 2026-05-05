@@ -33,6 +33,8 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 		taxRoutes.POST("/start-crawl", h.StartCrawl)
 		taxRoutes.GET("/status", h.CheckCrawlStatus)
 		taxRoutes.POST("/logout", h.LogoutTax)
+		taxRoutes.POST("/shutdown", h.ShutdownTax)
+		taxRoutes.GET("/showLogin", h.ShowLoginDialog)
 	}
 }
 
@@ -51,6 +53,20 @@ func (h *Handler) InitTaxPage(c *gin.Context) {
 		"message": "Trình duyệt đã mở và hiện Dialog đăng nhập!",
 	})
 }
+
+// ShowLoginDialog: Mở dialog đăng nhập trên tab hiện tại (sau logout)
+func (h *Handler) ShowLoginDialog(c *gin.Context) {
+	err := h.Crawler.ShowLoginDialog()
+	if err != nil {
+		c.JSON(500, gin.H{"status": "error", "message": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{
+		"status":  "success",
+		"message": "Dialog đăng nhập đã hiện!",
+	})
+}
+
 func (h *Handler) GetCaptcha(c *gin.Context) {
 	// 1. Gọi hàm Crawler của Thu
 	// Biến base64Data sẽ nhận giá trị "encoded" mà hàm GetCaptcha trả về
@@ -231,21 +247,37 @@ func (h *Handler) CheckCrawlStatus(c *gin.Context) {
 	})
 }
 func (h *Handler) LogoutTax(c *gin.Context) {
-	err := h.Crawler.Logout()
+	// Soft logout: đăng xuất trang thuế nhưng GIỮ Chrome mở
+	err := h.Crawler.SoftLogout()
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"status":  "error",
-			"message": "Không thể dọn dẹp trình duyệt: " + err.Error(),
+			"message": "Không thể đăng xuất: " + err.Error(),
 		})
 		return
 	}
 
-	// 2. Trả về thông báo thành công cho C#
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
-		"message": "Đã đăng xuất và đóng các phiên làm việc cũ!",
+		"message": "Đã đăng xuất trang thuế. Bấm Đăng nhập để chọn công ty tiếp!",
 	})
+}
 
-	fmt.Println("Hệ thống: API Logout đã thực thi xong.")
+// ShutdownTax: Đóng hoàn toàn Chrome. Gọi khi thoát app.
+func (h *Handler) ShutdownTax(c *gin.Context) {
+	err := h.Crawler.Shutdown()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"message": "Không thể đóng trình duyệt: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Đã đóng trình duyệt hoàn toàn.",
+	})
 }

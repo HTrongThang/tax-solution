@@ -32,7 +32,8 @@ type CrawlerService struct {
 func NewCrawlerService() *CrawlerService {
 	l := launcher.New().
 		Leakless(false).
-		Headless(false)
+		// Headless(true)
+		Headless(false) // Hiển thị cửa sổ Chrome
 
 	// Tự tìm Chrome/Chromium được cài trên máy thay vì hardcode path
 	if chromePath, found := launcher.LookPath(); found {
@@ -58,8 +59,13 @@ func (s *CrawlerService) ShowLogin() error {
 	fmt.Println("Đang mở trang chủ...")
 
 	// Khởi tạo trang và gán vào s.Page để dùng cho các hàm Login, Crawl sau này
-	s.Page = s.Browser.MustPage("https://hoadondientu.gdt.gov.vn/")
-	s.Page.MustWaitLoad()
+	err := rod.Try(func() {
+		s.Page = s.Browser.MustPage("https://hoadondientu.gdt.gov.vn/")
+		s.Page.MustWaitLoad()
+	})
+	if err != nil {
+		return fmt.Errorf("không thể mở trang thuế: %v", err)
+	}
 
 	// --- XỬ LÝ QUẢNG CÁO TỐI ƯU ---
 	_ = rod.Try(func() {
@@ -70,11 +76,45 @@ func (s *CrawlerService) ShowLogin() error {
 
 	fmt.Println("Đang mở Dialog đăng nhập...")
 	// Tìm nút Đăng nhập bằng XPath
-	loginBtn := s.Page.MustElementX("//*[contains(text(), 'Đăng nhập')]")
-	loginBtn.MustWaitVisible().MustClick()
+	err = rod.Try(func() {
+		loginBtn := s.Page.Timeout(10 * time.Second).MustElementX("//*[contains(text(), 'Đăng nhập')]")
+		loginBtn.MustWaitVisible().MustClick()
 
-	// Đợi Modal (Dialog) hiện lên hoàn toàn
-	s.Page.MustElement(".ant-modal-content").MustWaitVisible()
+		// Đợi Modal (Dialog) hiện lên hoàn toàn
+		s.Page.Timeout(10 * time.Second).MustElement(".ant-modal-content").MustWaitVisible()
+	})
+	if err != nil {
+		return fmt.Errorf("không thể mở dialog đăng nhập: %v", err)
+	}
+
+	fmt.Println("[DEBUG] Dialog Đăng nhập đã hiện!")
+	return nil
+}
+
+// ShowLoginDialog: Mở dialog đăng nhập trên TAB HIỆN TẠI (không mở tab mới).
+// Dùng sau SoftLogout khi page đã ở trang chủ.
+func (s *CrawlerService) ShowLoginDialog() error {
+	if s.Page == nil {
+		return fmt.Errorf("trình duyệt chưa mở")
+	}
+
+	fmt.Println("Đang mở Dialog đăng nhập trên tab hiện tại...")
+
+	// Đóng quảng cáo nếu có (timeout ngắn)
+	_ = rod.Try(func() {
+		s.Page.Timeout(1 * time.Second).MustElement(".ant-modal-close").MustClick()
+		fmt.Println("Đã đóng quảng cáo.")
+	})
+
+	// Click nút "Đăng nhập" và đợi dialog hiện
+	err := rod.Try(func() {
+		loginBtn := s.Page.Timeout(5 * time.Second).MustElementX("//*[contains(text(), 'Đăng nhập')]")
+		loginBtn.MustWaitVisible().MustClick()
+		s.Page.Timeout(5 * time.Second).MustElement(".ant-modal-content").MustWaitVisible()
+	})
+	if err != nil {
+		return fmt.Errorf("không thể mở dialog đăng nhập: %v", err)
+	}
 
 	fmt.Println("[DEBUG] Dialog Đăng nhập đã hiện!")
 	return nil
@@ -83,19 +123,29 @@ func (s *CrawlerService) ShowLogin() error {
 func (s *CrawlerService) GetCaptcha() (string, error) {
 	fmt.Println("📸 Đang lấy mã Captcha TRONG khung Đăng nhập...")
 
-	// 1. Chờ Dialog hiện lên hẳn
-	s.Page.MustElement(".ant-modal-content").MustWaitVisible()
+	if s.Page == nil {
+		return "", fmt.Errorf("trình duyệt chưa mở")
+	}
 
-	// 2. SELECTOR THẦN THÁNH
-	el := s.Page.MustElement(".ant-modal-content img.Captcha__Image-sc-1up1k1e-1")
+	var encoded string
+	err := rod.Try(func() {
+		// 1. Chờ Dialog hiện lên hẳn
+		s.Page.Timeout(5 * time.Second).MustElement(".ant-modal-content").MustWaitVisible()
 
-	// 3. Đợi ảnh ổn định
-	el.MustWaitVisible()
-	time.Sleep(1 * time.Second)
+		// 2. Tìm ảnh captcha
+		el := s.Page.Timeout(5 * time.Second).MustElement(".ant-modal-content img.Captcha__Image-sc-1up1k1e-1")
 
-	// 4. Chụp ảnh và encode Base64 (không lưu file, không mở app)
-	imgData := el.MustScreenshot("")
-	encoded := base64.StdEncoding.EncodeToString(imgData)
+		// 3. Đợi ảnh render xong
+		el.MustWaitVisible()
+		time.Sleep(300 * time.Millisecond)
+
+		// 4. Chụp ảnh và encode Base64
+		imgData := el.MustScreenshot("")
+		encoded = base64.StdEncoding.EncodeToString(imgData)
+	})
+	if err != nil {
+		return "", fmt.Errorf("không thể lấy captcha: %v", err)
+	}
 
 	fmt.Println("✅ Đã lấy xong mã Captcha!")
 	return encoded, nil
@@ -198,19 +248,100 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 	// --- 1. ĐIỀU HƯỚNG ---
 	c.CurrentStatus = "Đang mở menu Tra cứu..."
+
+	// Kiểm tra Page còn valid không
+	if c.Page == nil {
+		if stream != nil {
+			stream <- models.StreamData{Status: "❌ Trình duyệt chưa sẵn sàng", IsDone: true}
+		}
+		return nil, fmt.Errorf("page is nil - trình duyệt chưa sẵn sàng")
+	}
+
 	if err := c.Page.Context(ctx).Timeout(30 * time.Second).WaitLoad(); err != nil {
 		c.CurrentStatus = "Lỗi"
 		return nil, fmt.Errorf("không thể tải trang: %v", err)
 	}
 
-	c.Page.MustElementR(".ml-menu-item span", "Tra cứu").MustClick()
-	c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible().MustClick()
-	c.Page.MustWaitIdle()
+	// Kiểm tra xem đã ở trang Tra cứu chưa — nếu rồi thì bỏ qua navigate
+	currentURL := ""
+	_ = rod.Try(func() { currentURL = c.Page.MustInfo().URL })
+	alreadyOnSearch := strings.Contains(currentURL, "tra-cuu")
 
-	// --- 2. TÌM KIẾM ---
-	c.selectDateOnCalendar("#tngay input", fromDate)
-	c.selectDateOnCalendar("#dngay input", toDate)
-	c.Page.MustElement("button.ant-btn-primary[type='submit']").MustClick()
+	if !alreadyOnSearch {
+		navErr := rod.Try(func() {
+			c.Page.MustElementR(".ml-menu-item span", "Tra cứu").MustClick()
+			c.Page.MustElement("a[href*='/tra-cuu/tra-cuu-hoa-don']").MustWaitVisible().MustClick()
+			c.Page.MustWaitIdle()
+		})
+		if navErr != nil {
+			if stream != nil {
+				stream <- models.StreamData{Status: "❌ Không thể mở trang tra cứu", IsDone: true}
+			}
+			return nil, fmt.Errorf("lỗi điều hướng: %v", navErr)
+		}
+	} else {
+		fmt.Println("📄 Đã ở trang Tra cứu, bỏ qua điều hướng.")
+	}
+
+	// --- 2. TÌM KIẾM (chọn ngày thông minh: so sánh với anchor hiện tại) ---
+	// Đọc ngày hiện tại trên trang thuế
+	var curFrom, curTo string
+	_ = rod.Try(func() {
+		curFrom = *c.Page.MustElement("#tngay input").MustAttribute("value")
+		curTo = *c.Page.MustElement("#dngay input").MustAttribute("value")
+	})
+	fmt.Printf("📊 Ngày hiện tại trên trang: %s → %s | Muốn chọn: %s → %s\n", curFrom, curTo, fromDate, toDate)
+
+	// Parse ngày để so sánh (dd/mm/yyyy)
+	parseDate := func(s string) time.Time {
+		t, _ := time.Parse("02/01/2006", s)
+		return t
+	}
+	newFrom := parseDate(fromDate)
+	oldFrom := parseDate(curFrom)
+	oldTo := parseDate(curTo)
+
+	// Nếu ngày mới nằm NGOÀI phạm vi 31 ngày hiện tại → reset cả 2 ô ngày
+	needReset := !newFrom.IsZero() && !oldFrom.IsZero() && !oldTo.IsZero() &&
+		(newFrom.Before(oldFrom) || newFrom.After(oldTo))
+
+	if needReset {
+		fmt.Println("🔄 Ngày mới ngoài phạm vi 31 ngày → xóa trắng ô ngày để reset anchor")
+		_ = rod.Try(func() {
+			// Click nút X (clear) trên cả 2 DatePicker để xóa anchor cũ
+			c.Page.MustEval(`() => {
+				document.querySelectorAll('.ant-calendar-picker-clear').forEach(btn => {
+					btn.style.opacity = '1';
+					btn.style.display = 'block';
+					btn.click();
+				});
+			}`)
+		})
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Nhập FROM trước, rồi TO sau
+	if err := c.selectDateOnCalendar("#tngay input", fromDate); err != nil {
+		if stream != nil {
+			stream <- models.StreamData{Status: "❌ Lỗi chọn ngày bắt đầu: " + err.Error(), IsDone: true}
+		}
+		return nil, err
+	}
+	if err := c.selectDateOnCalendar("#dngay input", toDate); err != nil {
+		if stream != nil {
+			stream <- models.StreamData{Status: "❌ Lỗi chọn ngày kết thúc: " + err.Error(), IsDone: true}
+		}
+		return nil, err
+	}
+	err := rod.Try(func() {
+		c.Page.MustElement("button.ant-btn-primary[type='submit']").MustClick()
+	})
+	if err != nil {
+		if stream != nil {
+			stream <- models.StreamData{Status: "❌ Không thể click nút tìm kiếm", IsDone: true}
+		}
+		return nil, fmt.Errorf("không thể click nút tìm kiếm: %v", err)
+	}
 
 	// Đợi 1.5s để cho website xử lý request → notification kịp xuất hiện
 	time.Sleep(1500 * time.Millisecond)
@@ -273,6 +404,12 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 				if strings.Contains(txt, "Có 0 kết quả") {
 					c.CurrentStatus = "Không có kết quả"
+					if stream != nil {
+						stream <- models.StreamData{
+							Status: "📭 Không tìm thấy hóa đơn nào trong khoảng thời gian này.",
+							IsDone: true,
+						}
+					}
 					return allInvoices, nil
 				}
 
@@ -418,84 +555,78 @@ func (c *CrawlerService) getFirstInvoiceNoFromUI() string {
 	return res.Value.String()
 }
 
-// selectDateOnCalendar thực hiện chọn ngày trên giao diện Ant Design Calendar
-func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) {
+// selectDateOnCalendar: mở popup lịch → gõ ngày vào ô .ant-calendar-input → Enter
+func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) error {
 	parts := strings.Split(dateStr, "/")
 	if len(parts) != 3 {
-		fmt.Printf("⚠️ Định dạng ngày không hợp lệ: %s\n", dateStr)
-		return
+		return fmt.Errorf("định dạng ngày không hợp lệ: %s", dateStr)
 	}
-
-	dayst := strings.TrimLeft(parts[0], "0")
-	// FIX: Convert sang số để so sánh đúng ("01" == "1" khi là số)
-	monthInt, _ := strconv.Atoi(parts[1])
-	yearst := parts[2]
 
 	fmt.Printf("📅 Đang chọn %s cho ô %s...\n", dateStr, selector)
 
-	// Click để mở popup lịch
-	elInput := c.Page.MustElement(selector)
-	elInput.MustClick()
-	time.Sleep(800 * time.Millisecond)
-
-	// --- Vòng lặp chọn Năm --- (tối đa 20 lần, tránh treo vĩnh viễn)
-	for i := 0; i < 20; i++ {
-		calYear := c.Page.MustElement(".ant-calendar-year-select").MustText()
-		if calYear == yearst {
+	// 1. Click ô date picker để mở popup calendar
+	var clickErr error
+	for retry := 0; retry < 3; retry++ {
+		clickErr = rod.Try(func() {
+			el := c.Page.MustElement(selector)
+			el.MustWaitVisible()
+			el.MustClick()
+		})
+		if clickErr == nil {
 			break
 		}
-		if i == 19 {
-			fmt.Printf("⚠️ Timeout chọn năm %s (còn hiển %s), bỏ qua\n", yearst, calYear)
-			break
-		}
-		if yearst > calYear {
-			c.Page.MustElement(".ant-calendar-next-year-btn").MustClick()
-		} else {
-			c.Page.MustElement(".ant-calendar-prev-year-btn").MustClick()
-		}
-		time.Sleep(150 * time.Millisecond)
+		fmt.Printf("⚠️ Retry click ô lịch lần %d: %v\n", retry+1, clickErr)
+		time.Sleep(500 * time.Millisecond)
 	}
-
-	// --- Vòng lặp chọn Tháng --- (tối đa 15 lần, tránh treo vĩnh viễn)
-	// FIX: Dùng so sánh số thay vì string để tránh "01" != "1"
-	for i := 0; i < 15; i++ {
-		calMonthFull := c.Page.MustElement(".ant-calendar-month-select").MustText()
-		// Làm sạch chuỗi tháng (Xóa "Thg" hoặc "Tháng"), strip số 0 đầu
-		calMonthStr := strings.TrimSpace(strings.ReplaceAll(calMonthFull, "Thg", ""))
-		calMonthStr = strings.TrimSpace(strings.ReplaceAll(calMonthStr, "Tháng", ""))
-		calMonthInt, _ := strconv.Atoi(strings.TrimSpace(calMonthStr))
-
-		if calMonthInt == monthInt {
-			break
-		}
-		if i == 14 {
-			fmt.Printf("⚠️ Timeout chọn tháng %d (còn hiển %d), bỏ qua\n", monthInt, calMonthInt)
-			break
-		}
-		if monthInt > calMonthInt {
-			c.Page.MustElement(".ant-calendar-next-month-btn").MustClick()
-		} else {
-			c.Page.MustElement(".ant-calendar-prev-month-btn").MustClick()
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-
-	// --- Click chọn đúng Ngày ---
-	cells := c.Page.MustElements(".ant-calendar-table .ant-calendar-cell")
-	for _, cell := range cells {
-		if cell.MustText() == dayst {
-			classPtr := cell.MustAttribute("class")
-			// Đảm bảo không click nhầm vào ngày của tháng trước hoặc tháng sau đang hiển thị mờ
-			if classPtr != nil &&
-				!strings.Contains(*classPtr, "last-month-cell") &&
-				!strings.Contains(*classPtr, "next-month-btn-day") {
-				cell.MustClick()
-				fmt.Printf("✅ Đã chọn ngày %s\n", dayst)
-				break
-			}
-		}
+	if clickErr != nil {
+		return fmt.Errorf("không thể mở ô lịch %s: %v", selector, clickErr)
 	}
 	time.Sleep(500 * time.Millisecond)
+
+	// 2. Tìm ô input bên trong popup calendar và gõ ngày
+	err := rod.Try(func() {
+		calInput := c.Page.MustElement(".ant-calendar-input")
+		calInput.MustWaitVisible()
+		calInput.MustSelectAllText().MustInput(dateStr)
+		fmt.Printf("✅ Đã nhập ngày %s vào ô calendar\n", dateStr)
+	})
+	if err != nil {
+		return fmt.Errorf("không thể nhập ngày vào calendar: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// 3. Gỡ khóa disabled-cell (bypass giới hạn 30 ngày từ anchor cũ)
+	_ = rod.Try(func() {
+		c.Page.MustEval(`() => {
+			document.querySelectorAll('.ant-calendar-disabled-cell').forEach(cell => {
+				cell.classList.remove('ant-calendar-disabled-cell');
+				const d = cell.querySelector('.ant-calendar-date');
+				if (d) d.removeAttribute('aria-disabled');
+			});
+		}`)
+	})
+	time.Sleep(200 * time.Millisecond)
+
+	// 4. Click ngày bằng JavaScript (bypass React disabled handler)
+	_ = rod.Try(func() {
+		dayst := strings.TrimLeft(parts[0], "0")
+		c.Page.MustEval(`(day) => {
+			const cells = document.querySelectorAll('.ant-calendar-table .ant-calendar-cell');
+			for (const cell of cells) {
+				const cls = cell.className || '';
+				if (cls.includes('last-month-cell') || cls.includes('next-month-btn-day')) continue;
+				const dateDiv = cell.querySelector('.ant-calendar-date');
+				if (dateDiv && dateDiv.textContent.trim() === day) {
+					dateDiv.click();
+					break;
+				}
+			}
+		}`, dayst)
+		fmt.Printf("✅ Đã click chọn ngày %s\n", dayst)
+	})
+
+	time.Sleep(500 * time.Millisecond)
+	return nil
 }
 
 // SetupBrowserDownload: Chỉ cấu hình browser download đến Invoices_Temp.
@@ -764,7 +895,29 @@ func (c *CrawlerService) retry(attempts int, sleep time.Duration, f func() bool)
 	}
 	return fmt.Errorf("timeout sau %d lần thử", attempts)
 }
-func (s *CrawlerService) Logout() error {
+
+// SoftLogout: Đăng xuất khỏi trang thuế NHƯNG GIỮ Chrome mở.
+func (s *CrawlerService) SoftLogout() error {
+	if s.Page == nil {
+		return fmt.Errorf("trình duyệt chưa mở")
+	}
+
+	fmt.Println("🔄 Đang đăng xuất khỏi trang thuế (giữ Chrome)...")
+
+	// 1. Click nút đăng xuất
+	_ = rod.Try(func() {
+		btns := s.Page.Timeout(1 * time.Second).MustElements(`button[class*="styles__IconButton"]`)
+		if len(btns) > 0 {
+			btns[1].MustClick()
+			fmt.Printf("✅ Đã click nút đăng xuất (tìm thấy %d nút)\n", len(btns))
+		}
+	})
+
+	return nil
+}
+
+// Shutdown: Đóng hoàn toàn trình duyệt Chrome. Dùng khi thoát app.
+func (s *CrawlerService) Shutdown() error {
 	if s.Browser == nil {
 		return nil
 	}
@@ -777,6 +930,7 @@ func (s *CrawlerService) Logout() error {
 
 	// Sau khi Close, biến Browser sẽ không dùng được nữa cho đến khi Init lại
 	s.Browser = nil
+	s.Page = nil
 
 	fmt.Println("Hệ thống: Đã đóng trình duyệt Chrome.")
 	return nil
