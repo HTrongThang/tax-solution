@@ -17,10 +17,39 @@ namespace Frontend.Services
         private readonly HttpClient _client = new HttpClient
         {
             BaseAddress = new Uri("http://localhost:8080"),
+            Timeout = TimeSpan.FromSeconds(30)
+        };
+
+        // Client riêng cho SSE (stream dài hạn) — timeout do CancellationToken quản lý
+        private readonly HttpClient _sseClient = new HttpClient
+        {
+            BaseAddress = new Uri("http://localhost:8080"),
             Timeout = System.Threading.Timeout.InfiniteTimeSpan
         };
 
         public async Task<string> Init() => await _client.GetStringAsync("/api/tax/init");
+
+        // Mở dialog đăng nhập trên tab hiện tại (sau logout, không mở tab mới)
+        public async Task<(string status, string message)> ShowLoginDialogAsync()
+        {
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var response = await _client.GetAsync("/api/tax/showLogin", cts.Token);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    dynamic result = JsonConvert.DeserializeObject(content);
+                    return (result.status.ToString(), result.message.ToString());
+                }
+                return ("error", $"Server báo lỗi: {response.StatusCode}");
+            }
+            catch (Exception ex)
+            {
+                return ("error", "Lỗi kết nối: " + ex.Message);
+            }
+        }
 
         public async Task<string> GetCaptchaBase64()
         {
@@ -28,31 +57,34 @@ namespace Frontend.Services
             {
                 // 1. Gọi API
                 var response = await _client.GetAsync("/api/tax/captcha");
-
-                // Đảm bảo request thành công (200 OK)
-                response.EnsureSuccessStatusCode();
-
                 var content = await response.Content.ReadAsStringAsync();
 
-                // 2. Parse dùng Newtonsoft (Ép kiểu về dynamic để dùng dấu chấm)
+                // Xử lý cả trường hợp lỗi 500 (không crash app)
+                if (!response.IsSuccessStatusCode)
+                {
+                    System.Diagnostics.Debug.WriteLine($"GetCaptcha lỗi {response.StatusCode}: {content}");
+                    return null;
+                }
+
+                // 2. Parse dùng Newtonsoft
                 dynamic result = JsonConvert.DeserializeObject<dynamic>(content);
 
-                // 3. Kiểm tra và trả về (Lưu ý: Go trả về Status viết hoa hay thường thì C# phải viết y hệt)
+                // 3. Kiểm tra và trả về
                 if (result != null && (result.status == "success" || result.Status == "success"))
                 {
-                    // Trả về trường Data (viết hoa chữ D nếu Go định nghĩa vậy)
                     return result.data ?? result.Data;
                 }
                 else
                 {
                     string msg = result?.message ?? "Lỗi không xác định từ Backend";
-                    throw new Exception(msg);
+                    System.Diagnostics.Debug.WriteLine("GetCaptcha: " + msg);
+                    return null;
                 }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("Lỗi GetCaptcha: " + ex.Message);
-                throw; // Đẩy lỗi ra ngoài để Form hiện Dialog
+                return null;
             }
         }
 
@@ -90,30 +122,42 @@ namespace Frontend.Services
                 return ("error", "Không thể kết nối, hãy khởi động lại ứng dụng: " + ex.Message);
             }
         }
+        // Soft logout: đăng xuất trang thuế, giữ Chrome mở
         public async Task<(string status, string message)> LogoutTaxAsync()
         {
             try
             {
-                using (var client = new HttpClient())
-                {
-                    client.Timeout = TimeSpan.FromSeconds(10);
-                    var response = await client.PostAsync("http://localhost:8080/api/tax/logout", null);
-                    var content = await response.Content.ReadAsStringAsync();
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var response = await _client.PostAsync("/api/tax/logout", null, cts.Token);
+                var content = await response.Content.ReadAsStringAsync();
 
-                    if (response.IsSuccessStatusCode)
-                    {
-                        dynamic result = JsonConvert.DeserializeObject(content);
-                        return (result.status.ToString(), result.message.ToString());
-                    }
-                    else
-                    {
-                        return ("error", $"Server báo lỗi: {response.StatusCode}");
-                    }
+                if (response.IsSuccessStatusCode)
+                {
+                    dynamic result = JsonConvert.DeserializeObject(content);
+                    return (result.status.ToString(), result.message.ToString());
+                }
+                else
+                {
+                    return ("error", $"Server báo lỗi: {response.StatusCode}");
                 }
             }
             catch (Exception ex)
             {
                 return ("error", "Không thể kết nối tới Backend Go: " + ex.Message);
+            }
+        }
+
+        // Shutdown: Đóng Chrome hoàn toàn. Gọi khi thoát app.
+        public async Task ShutdownAsync()
+        {
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await _client.PostAsync("/api/tax/shutdown", null, cts.Token);
+            }
+            catch
+            {
+                // Bỏ qua lỗi khi shutdown (app đang đóng)
             }
         }
 
@@ -147,7 +191,7 @@ namespace Frontend.Services
                 string tDate = endDate.ToString("dd/MM/yyyy");
 
                 var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}";
-                using (var response = await _client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+                using (var response = await _sseClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
                 {
                     // Xử lý riêng 409 Conflict (hệ thống đang bận)
                     if ((int)response.StatusCode == 409)

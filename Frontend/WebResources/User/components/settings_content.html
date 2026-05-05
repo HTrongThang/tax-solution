@@ -1,105 +1,144 @@
-<main class="max-w-[99%] mx-auto w-full space-y-[2vh] animate-in fade-in duration-300">
-    <div class="border-b-2 border-slate-200 pb-[1.5vh]">
-        <h1 class="font-bold text-slate-800 tracking-tight" style="font-size: clamp(1.25rem, 2vw, 2.25rem);">
-            Quản trị danh sách MST
-        </h1>
-        <p class="text-slate-500 mt-1 font-medium" style="font-size: clamp(0.75rem, 1vw, 1rem);">
-            Lưu trữ Mã số thuế để khởi tạo tiến trình khai thác tự động.
-        </p>
+<div class="flex flex-col gap-4 animate-in fade-in duration-500">
+
+    <!-- Header -->
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+        <div class="flex items-center gap-3">
+            <div class="bg-gradient-to-br from-slate-800 to-slate-900 p-2.5 rounded-xl text-white text-lg shadow-md">⚙️
+            </div>
+            <div>
+                <h1 class="text-base font-extrabold text-slate-800 tracking-tight">Quản trị danh sách MST</h1>
+                <p class="text-[11px] text-slate-400 font-medium mt-0.5">Lưu trữ Mã số thuế để khởi tạo tiến trình khai
+                    thác tự động</p>
+            </div>
+        </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-12 gap-[3vw]">
-        <div class="md:col-span-4 space-y-[2vh]">
-            <div class="bg-white border-2 border-slate-200 rounded-2xl p-[1vw] shadow-md">
-                <h3 class="font-black text-slate-700 mb-[1vh] uppercase tracking-widest" style="font-size: clamp(0.75rem, 1vw, 1.125rem);">
-                    Thêm mới
-                </h3>
+    <div class="grid grid-cols-12 gap-4">
 
-                <div class="space-y-[3vh]">
+        <!-- Form Panel -->
+        <div class="col-span-4 flex flex-col gap-3">
+            <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-1 h-5 bg-emerald-500 rounded-full"></div>
+                    <span class="text-[11px] font-extrabold text-slate-700 uppercase tracking-widest">Thêm / Sửa</span>
+                </div>
+
+                <div class="space-y-3">
+                    <!-- MST Input -->
                     <div class="group">
-                        <label class="flex items-center gap-2 font-bold text-slate-600 mb-2 ml-1 transition-colors group-focus-within:text-blue-600" style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
-                            <span>🏢</span> Mã số thuế doanh nghiệp
+                        <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">
+                            Mã số thuế
                         </label>
                         <div class="relative">
                             <input type="text" id="mst_input" maxlength="14"
-                                   class="w-full bg-slate-50 border-2 border-slate-200 p-[0.7vw] pl-[3vw] rounded-2xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold tracking-[0.1em] shadow-sm"
-                                   style="font-size: clamp(1rem, 1.4vw, 1.4rem);" placeholder="03xxxxxxxx"
-                                   onkeypress="if(event.key === 'Enter') document.getElementById('company_input').focus()">
-                            <span class="absolute left-[1vw] top-1/2 -translate-y-1/2 opacity-30 text-[1.2vw]">🆔</span>
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 rounded-xl outline-none text-sm font-bold tracking-wider
+                                       focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 transition-all placeholder:text-slate-300"
+                                placeholder="03xxxxxxxx"
+                                onkeypress="if(event.key === 'Enter') document.getElementById('company_input').focus()">
+                            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm">🆔</span>
                         </div>
                     </div>
 
+                    <!-- Company Input -->
                     <div class="group">
-                        <label class="flex items-center gap-2 font-bold text-slate-600 mb-2 ml-1 transition-colors group-focus-within:text-blue-600" style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
-                            <span>🏢</span> Tên đơn vị / Công ty
+                        <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">
+                            Tên công ty
                         </label>
                         <div class="relative">
                             <input type="text" id="company_input"
-                                   class="w-full bg-slate-50 border-2 border-slate-200 p-[0.7vw] pl-[3vw] rounded-2xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all font-semibold italic shadow-sm"
-                                   style="font-size: clamp(1rem, 1.4vw, 1.4rem);" placeholder="Công ty TNHH..."
-                                   onkeypress="if(event.key === 'Enter') document.getElementById('pass_input').focus()">
-                            <span class="absolute left-[1vw] top-1/2 -translate-y-1/2 opacity-30 text-[1.2vw]">🏛️</span>
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 rounded-xl outline-none text-sm font-medium
+                                       focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 transition-all placeholder:text-slate-300"
+                                placeholder="Công ty TNHH..."
+                                onkeypress="if(event.key === 'Enter') document.getElementById('pass_input').focus()">
+                            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm">🏛️</span>
                         </div>
                     </div>
 
+                    <!-- Password Input -->
                     <div class="group">
-                        <label class="flex items-center gap-2 font-bold text-slate-600 mb-2 ml-1 transition-colors group-focus-within:text-blue-600" style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
-                            <span>🔒</span> Mật khẩu hệ thống
+                        <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">
+                            Mật khẩu
                         </label>
                         <div class="relative">
                             <input type="password" id="pass_input"
-                                   class="w-full bg-slate-50 border-2 border-slate-200 p-[0.7vw] pl-[3vw] rounded-2xl outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all tracking-[0.3em]"
-                                   style="font-size: clamp(1rem, 1.4vw, 1.4rem);" placeholder="••••••••"
-                                   onkeypress="if(event.key === 'Enter') addToTempList()">
-                            <span class="absolute left-[1vw] top-1/2 -translate-y-1/2 opacity-30 text-[1.2vw]">🔑</span>
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 rounded-xl outline-none text-sm tracking-widest
+                                       focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 transition-all placeholder:text-slate-300"
+                                placeholder="••••••••" onkeypress="if(event.key === 'Enter') addToTempList()">
+                            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm">🔑</span>
                         </div>
                     </div>
 
-                    <button onclick="addToTempList()" class="w-full py-[2vh] bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black transition-all active:scale-[0.98] shadow-xl shadow-blue-500/20 hover:shadow-blue-500/40 tracking-widest flex items-center justify-center gap-3 group">
-                        <span>THÊM VÀO HÀNG CHỜ</span>
-                        <span class="transition-transform group-hover:translate-x-1">🚀</span>
-                    </button>
+                    <!-- Buttons -->
+                    <div class="flex gap-2 pt-1">
+                        <button id="btn-submit-mst" onclick="addToTempList()" class="flex-1 py-2.5 bg-slate-900 text-white rounded-xl text-[11px] font-bold uppercase tracking-wider
+                                   hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.98]
+                                   disabled:opacity-50 disabled:cursor-not-allowed group">
+                            <span>THÊM VÀO HÀNG CHỜ</span>
+                            <span class="transition-transform group-hover:translate-x-0.5 text-xs">🚀</span>
+                        </button>
+                        <button id="btn-cancel-edit" onclick="cancelEdit()"
+                            class="hidden py-2.5 px-4 bg-slate-100 text-slate-600 rounded-xl text-[11px] font-bold uppercase
+                                   hover:bg-rose-50 hover:text-rose-600 transition-all active:scale-[0.98] border border-slate-200">
+                            ✕ Hủy
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div class="p-[1.5vw] bg-blue-50 border-2 border-blue-100 rounded-2xl">
-                <p class="text-blue-600 leading-relaxed font-bold" style="font-size: clamp(0.75rem, 0.9vw, 1rem);">
-                    💡 Mẹo: Nhấn Enter ở ô mật khẩu để thêm nhanh.
+            <!-- Tip Card -->
+            <div class="bg-emerald-50/50 border border-emerald-100 rounded-xl px-3 py-2.5 flex items-start gap-2">
+                <span class="text-xs mt-0.5">💡</span>
+                <p class="text-[10px] text-emerald-700 font-medium leading-relaxed">
+                    Nhấn <kbd
+                        class="bg-white px-1.5 py-0.5 rounded text-[9px] font-bold border border-emerald-200 shadow-sm">Enter</kbd>
+                    ở ô mật khẩu để thêm nhanh
                 </p>
             </div>
         </div>
 
-        <div class="md:col-span-8 space-y-6">
-            <div class="bg-white border-2 border-slate-200 rounded-2xl shadow-md overflow-hidden flex flex-col" style="min-height: 60vh;">
-                <div class="p-[0.5vw] bg-slate-50 border-b-2 border-slate-200 flex justify-between items-center">
-                    <span class="font-black text-slate-600 uppercase tracking-widest" style="font-size: clamp(0.75rem, 1vw, 1.1rem);">
-                        Danh sách MST đã lưu
-                    </span>
-                    <button id="btnSaveAll" onclick="submitAllToCSharp()" class="hidden px-[2vw] py-[1vh] bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black transition-all shadow-md tracking-widest uppercase">
-                        LƯU <span id="count_badge" class="bg-white text-emerald-600 px-2 rounded-md mx-1">0</span> MST VÀO JSON ✅
+        <!-- Table Panel -->
+        <div class="col-span-8">
+            <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col"
+                style="min-height: 55vh;">
+                <div class="px-4 py-3 bg-slate-50/80 border-b border-slate-100 flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                        <div class="w-1 h-5 bg-slate-800 rounded-full"></div>
+                        <span class="text-[11px] font-extrabold text-slate-700 uppercase tracking-widest">
+                            Danh sách MST đã lưu
+                        </span>
+                    </div>
+                    <button id="btnSaveAll" onclick="submitAllToCSharp()" class="hidden px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold
+                               transition-all shadow-sm uppercase tracking-wider flex items-center gap-1.5">
+                        LƯU <span id="count_badge" class="bg-white/20 px-1.5 py-0.5 rounded text-[9px]">0</span> MST ✅
                     </button>
                 </div>
 
-                <div class="border-t border-slate-200">
-                    <table class="w-full text-left">
+                <div class="overflow-x-auto flex-1">
+                    <table class="w-full text-left border-collapse">
                         <thead>
-                            <tr class="border-b border-slate-200 bg-slate-50/50">
-                                <th class="py-3 px-4 text-[11px] font-bold text-slate-900 uppercase tracking-wider w-[50px] text-center">STT</th>
-
-                                <th class="py-3 px-2 text-[11px] font-bold text-slate-900 uppercase tracking-wider w-[150px]">Mã số thuế</th>
-
-                                <th class="py-3 px-2 text-[11px] font-bold text-slate-900 uppercase tracking-wider w-auto">Tên công ty</th>
-
-                                <th class="py-3 px-2 text-[11px] font-bold text-slate-900 uppercase tracking-wider w-[120px]">Ngày thêm</th>
-
-                                <th class="py-3 px-4 text-[11px] font-bold text-slate-900 uppercase tracking-wider w-[100px] text-right">Chức năng</th>
+                            <tr class="border-b border-slate-100 bg-slate-50/30">
+                                <th
+                                    class="py-3 px-4 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-12 text-center">
+                                    STT</th>
+                                <th
+                                    class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[140px]">
+                                    Mã số thuế</th>
+                                <th class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider">Tên
+                                    công ty</th>
+                                <th
+                                    class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[100px]">
+                                    Ngày thêm</th>
+                                <th
+                                    class="py-3 px-4 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[80px] text-right">
+                                    Thao tác</th>
                             </tr>
                         </thead>
-                        <tbody id="temp_tax_list" class="text-slate-600">
+                        <tbody id="temp_tax_list" class="divide-y divide-slate-50">
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
+
     </div>
-</main>
+</div>

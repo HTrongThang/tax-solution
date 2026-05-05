@@ -31,19 +31,23 @@ namespace Frontend.Views
         private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
         private readonly string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
         // Lock để đồng bộ truy cập file
-        private readonly object _fileLock = new object();
+        // Semaphore để đồng bộ truy cập file (thay lock để dùng được với async)
+        private readonly SemaphoreSlim _fileSemaphore = new SemaphoreSlim(1, 1);
         // Semaphore để tuần tự hóa các lệnh ExecuteScriptAsync tới WebView2
         private readonly SemaphoreSlim _webviewSemaphore = new SemaphoreSlim(1, 1);
         public UserForm()
         {
             InitializeComponent();
             this.Load += UserForm_Load;
+            this.FormClosing += UserForm_FormClosing;
             this.FormClosed += UserForm_FormClosed;
-            LoadCompaniesToRAM();
         }
         private async void UserForm_Load(object sender, EventArgs e)
         {
             this.Opacity = 0;
+
+            // Nạp dữ liệu công ty từ file vào RAM (async để không block UI)
+            await LoadCompaniesToRAM();
 
             // 1. Căn chỉnh kích thước
             Rectangle screenRect = Screen.PrimaryScreen.WorkingArea;
@@ -125,16 +129,21 @@ namespace Frontend.Views
             string role = UserSession.Role ?? "Nhân viên";
             string initials = UserSession.GetInitials(); // Ví dụ: "TT"
 
-            // 2. JavaScript để cập nhật đúng các ID trong file dashboard.html của Thắng
+            // 2. Escape giá trị để tránh XSS/syntax error (JsonConvert.ToString tự thêm ngoặc kép + escape)
+            string safeName = JsonConvert.ToString(name);
+            string safeRole = JsonConvert.ToString(role);
+            string safeInitials = JsonConvert.ToString(initials);
+
+            // 3. JavaScript để cập nhật đúng các ID trong file dashboard.html
             string jsCode = $@"
                 (function() {{
                     const nameEl = document.getElementById('header_user_name');
                     const roleEl = document.getElementById('header_user_role');
                     const avatarEl = document.getElementById('header_user_avatar');
 
-                    if(nameEl) nameEl.innerText = '{name}';
-                    if(roleEl) roleEl.innerText = '{role}';
-                    if(avatarEl) avatarEl.innerText = '{initials}';
+                    if(nameEl) nameEl.innerText = {safeName};
+                    if(roleEl) roleEl.innerText = {safeRole};
+                    if(avatarEl) avatarEl.innerText = {safeInitials};
                 }})();";
 
             await webViewUser.CoreWebView2.ExecuteScriptAsync(jsCode);
@@ -173,7 +182,7 @@ namespace Frontend.Views
                         var newCompany = new CompanyModel
                         {
                             Mst = packet.data.mst,
-                            Password = packet.data.password,
+                            Password = packet.data.pass,
                             CompanyName = packet.data.company
                         };
 
@@ -189,7 +198,7 @@ namespace Frontend.Views
                         _cachedCompanies.Add(newCompany);
 
                         // 4. GHI FILE: Thực hiện ghi xuống ổ cứng để lưu trữ lâu dài (thread-safe)
-                        WriteCompaniesToFile(_cachedCompanies);
+                        await WriteCompaniesToFile(_cachedCompanies);
 
                         // 5. PHẢN HỒI GIAO DIỆN: Gom lệnh để chạy cực nhanh
                         // Vừa hiện alert đẹp, vừa đóng modal thêm mới (nếu có), vừa render lại dropdown
@@ -235,7 +244,7 @@ namespace Frontend.Views
 
                         // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
                         // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
-                        WriteCompaniesToFile(_cachedCompanies);
+                        await WriteCompaniesToFile(_cachedCompanies);
 
                         // 3. PHẢN HỒI GIAO DIỆN: Gom lệnh để Web cập nhật ngay lập tức
                         string jsDeleteSuccess = $@"
@@ -269,6 +278,17 @@ namespace Frontend.Views
                     break;
                 case "REQUEST_OPEN_CAPTCHA":
                     System.Diagnostics.Debug.WriteLine(">>> Hệ thống: Đã nhận lệnh REQUEST_OPEN_CAPTCHA từ giao diện!");
+
+                    // Mở dialog đăng nhập trên tab hiện tại (không mở tab mới)
+                    var (loginDialogStatus, loginDialogMsg) = await _taxService.ShowLoginDialogAsync();
+                    if (loginDialogStatus != "success")
+                    {
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                            $"window.showAlert('Lỗi', 'Không thể mở form đăng nhập: {loginDialogMsg.Replace("'", "\\'")}', 'error')"
+                        );
+                        break;
+                    }
+
                     await LoadCaptchaToUI();
                     break;
                 case "SUBMIT_CAPTCHA":
@@ -335,19 +355,21 @@ namespace Frontend.Views
 
                     if (status == "success")
                     {
-                        // 1. Thông báo thành công cho giao diện Web
+                        // Cập nhật UI: nút "Đăng xuất" → "Đăng nhập"
                         await webViewUser.CoreWebView2.ExecuteScriptAsync(
-                            $"window.showAlert('Thành công', '{message}', 'success')"
+                            "if(window.updateLoginStatus) window.updateLoginStatus(false);"
                         );
 
-                        // 2. Tự động reload lại trang để xóa sạch dữ liệu cũ trên giao diện
-                        await webViewUser.CoreWebView2.ExecuteScriptAsync("window.location.reload()");
+                        string safeMsg = JsonConvert.ToString(message);
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                            $"window.showAlert('Thành công', {safeMsg}, 'success')"
+                        );
                     }
                     else
                     {
-                        // Thông báo lỗi nếu Logout thất bại
+                        string safeLogoutMsg = JsonConvert.ToString(message);
                         await webViewUser.CoreWebView2.ExecuteScriptAsync(
-                            $"window.showAlert('Lỗi Logout', '{message}', 'error')"
+                            $"window.showAlert('Lỗi Logout', {safeLogoutMsg}, 'error')"
                         );
                     }
                     break;
@@ -476,7 +498,7 @@ namespace Frontend.Views
             {
                 if (File.Exists(filePath))
                 {
-                    string jsonData = File.ReadAllText(filePath);
+                    string jsonData = await File.ReadAllTextAsync(filePath);
                     string safeJson = JsonConvert.ToString(jsonData);
                     await ExecuteScriptSerializedAsync($"window.loadInitialData({safeJson})");
                 }
@@ -486,8 +508,28 @@ namespace Frontend.Views
                 System.Diagnostics.Debug.WriteLine("Lỗi bắn dữ liệu: " + ex.Message);
             }
         }
-        private void UserForm_FormClosed(object sender, FormClosedEventArgs e)
+        private void UserForm_FormClosing(object sender, FormClosingEventArgs e)
         {
+            // Hỏi xác nhận trước khi đóng app
+            var result = MessageBox.Show(
+                "Bạn có chắc muốn thoát? Tất cả chương trình đang chạy sẽ bị đóng.",
+                "Xác nhận thoát",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question
+            );
+
+            if (result == DialogResult.No)
+            {
+                e.Cancel = true; // Hủy đóng
+                return;
+            }
+        }
+
+        private async void UserForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            // Đóng Chrome hoàn toàn khi thoát app
+            await _taxService.ShutdownAsync();
+
             // Lệnh này sẽ quét sạch tất cả các Form đang ẩn và đóng toàn bộ App
             Application.Exit();
         }
@@ -520,6 +562,14 @@ namespace Frontend.Views
                 // Use serialized execution to avoid concurrent calls
                 _ = ExecuteScriptSerializedAsync(jsCommand);
             }
+            else
+            {
+                // Captcha lỗi — báo user thử lại
+                await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                    "window.showAlert('Lỗi', 'Không lấy được captcha. Vui lòng thử lại!', 'error')"
+                );
+            }
+
         }
 
         // Helper: Ensure ExecuteScriptAsync calls are serialized to avoid concurrent execution issues
@@ -542,13 +592,13 @@ namespace Frontend.Views
                 _webviewSemaphore.Release();
             }
         }
-        private void LoadCompaniesToRAM()
+        private async Task LoadCompaniesToRAM()
         {
             try
             {
                 if (File.Exists(filePath))
                 {
-                    string jsonContent = File.ReadAllText(filePath);
+                    string jsonContent = await File.ReadAllTextAsync(filePath);
                     _cachedCompanies = JsonConvert.DeserializeObject<List<CompanyModel>>(jsonContent) ?? new List<CompanyModel>();
                     System.Diagnostics.Debug.WriteLine($">>> RAM: Đã nạp {_cachedCompanies.Count} công ty.");
                 }
@@ -654,7 +704,7 @@ namespace Frontend.Views
                 _currentCrawlRequestId = null;
             }
         }
-        private async Task PostWebMessageAsJson(object data)
+        private Task PostWebMessageAsJson(object data)
         {
             if (webViewUser?.CoreWebView2 != null)
             {
@@ -669,23 +719,25 @@ namespace Frontend.Views
                     webViewUser.CoreWebView2.PostWebMessageAsJson(json);
                 }
             }
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         // Helper: Thread-safe file write for tax_accounts.json
-        private void WriteCompaniesToFile(List<CompanyModel> companies)
+        private async Task WriteCompaniesToFile(List<CompanyModel> companies)
         {
             try
             {
-                lock (_fileLock)
-                {
-                    string jsonOutput = JsonConvert.SerializeObject(companies, Formatting.Indented);
-                    File.WriteAllText(filePath, jsonOutput);
-                }
+                await _fileSemaphore.WaitAsync();
+                string jsonOutput = JsonConvert.SerializeObject(companies, Formatting.Indented);
+                await File.WriteAllTextAsync(filePath, jsonOutput);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("WriteCompaniesToFile error: " + ex.Message);
+            }
+            finally
+            {
+                _fileSemaphore.Release();
             }
         }
 

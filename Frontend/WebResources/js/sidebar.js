@@ -22,7 +22,7 @@ window.confirmLogout = function () {
     if (window.chrome && window.chrome.webview) {
         // Xóa sạch LocalStorage trước khi thoát cho an toàn
         localStorage.clear();
-        window.chrome.webview.postMessage("LOGOUT");
+        window.chrome.webview.postMessage({ action: "LOGOUT" });
     }
 }
 
@@ -53,6 +53,15 @@ window.loadPage = async function (pagePath, element) {
                 window.chrome.webview.postMessage({ action: "GET_SETTINGS_DATA" });
                 console.log("Hệ thống: Đã gửi yêu cầu lấy dữ liệu cho trang: " + pagePath);
             }
+        }
+
+        // Khôi phục trạng thái đăng nhập khi chuyển tab
+        if (pagePath.includes('crawler_table.html') && window._isLoggedIn) {
+            setTimeout(() => {
+                if (typeof window.updateLoginStatus === 'function') {
+                    window.updateLoginStatus(true);
+                }
+            }, 100);
         }
         // ------------------------------
 

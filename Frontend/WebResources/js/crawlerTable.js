@@ -121,8 +121,9 @@ window.handleSseProgress = function (data) {
                 if (window.finalizeSearchUI) window.finalizeSearchUI();
             }, 50);
         } else {
-            // no invoices but still update pagination/status
-            handlePagination({ invoices: null, totalItems: total, currentPage: 1, pageSize: 20 });
+            // Không có hóa đơn → xóa sạch bảng cũ và hiện thông báo trống
+            renderInvoices([]);
+            handlePagination({ invoices: null, totalItems: 0, currentPage: 1, pageSize: 20 });
             if (window.finalizeSearchUI) window.finalizeSearchUI();
         }
     } else {
@@ -277,6 +278,8 @@ window.updateLoginStatus = function (isLoggedIn) {
     if (!btn) return;
 
     btn.disabled = false;
+    btn.style.opacity = "";
+    btn.style.cursor = "";
 
     const baseClass = "ml-2 text-[10px] font-bold px-3 py-1 rounded-md transition-all uppercase active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ";
     const emeraldStyle = "bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white";
@@ -286,10 +289,29 @@ window.updateLoginStatus = function (isLoggedIn) {
         btn.innerText = 'Đăng xuất';
         btn.className = baseClass + roseStyle;
         btn.dataset.state = "logged-in";
+        window._isLoggedIn = true;
     } else {
         btn.innerText = 'Đăng nhập';
         btn.className = baseClass + emeraldStyle;
         btn.dataset.state = "logged-out";
+        window._isLoggedIn = false;
+
+        // Xóa trắng dữ liệu hóa đơn khi đăng xuất
+        const tbody = document.getElementById('crawler-results-body');
+        if (tbody) tbody.innerHTML = '';
+
+        const paginationInfo = document.getElementById('crawler-pagination-info');
+        if (paginationInfo) paginationInfo.innerHTML = '';
+
+        const pagination = document.getElementById('crawler-pagination');
+        if (pagination) pagination.innerHTML = '';
+
+        // Reset status bar nếu có
+        const statusEl = document.getElementById('cpd-status');
+        if (statusEl) statusEl.textContent = '';
+
+        const countEl = document.getElementById('cpd-count');
+        if (countEl) countEl.textContent = '0';
     }
 };
 
@@ -307,7 +329,17 @@ window.handleAuthAction = function (btn) {
 window.handleLogoutClick = function () {
     if (confirm("Thắng có chắc chắn muốn đăng xuất tài khoản thuế này không?")) {
 
-        // 2. Gửi tin nhắn sang WinForms (C#)
+        // Disable nút + hiển thị loading
+        const btn = document.getElementById('btn-auth');
+        if (btn) {
+            btn.disabled = true;
+            btn._prevText = btn.innerText;
+            btn.innerText = "⏳ Đang xuất...";
+            btn.style.opacity = "0.6";
+            btn.style.cursor = "not-allowed";
+        }
+
+        // Gửi tin nhắn sang WinForms (C#)
         if (window.chrome && window.chrome.webview) {
             window.chrome.webview.postMessage({
                 action: "REQUEST_LOGOUT"
@@ -315,6 +347,13 @@ window.handleLogoutClick = function () {
             console.log("Hệ thống: Đã gửi yêu cầu Logout sang C#");
         } else {
             console.error("Lỗi: Không tìm thấy kết nối WebView2!");
+            // Reset nút nếu lỗi
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = btn._prevText || "Đăng xuất";
+                btn.style.opacity = "";
+                btn.style.cursor = "";
+            }
         }
     }
 };
@@ -555,6 +594,18 @@ window.handleSearchClick = function () {
         searchBtn.style.cursor = 'not-allowed';
         searchBtn.innerHTML = '⏳ Đang tìm...';
     }
+
+    // Xóa sạch kết quả cũ trước khi search mới
+    const tableBody = document.getElementById('crawler-results-body');
+    if (tableBody) tableBody.innerHTML = '';
+    const paginationEl = document.getElementById('pagination-container');
+    if (paginationEl) paginationEl.innerHTML = '';
+
+    // Reset bộ đếm hóa đơn về 0
+    const cpdCount = document.getElementById('cpd-count');
+    if (cpdCount) cpdCount.innerText = '0';
+    const paginationInfo = document.getElementById('crawler-pagination-info');
+    if (paginationInfo) paginationInfo.innerText = '';
 
     // 1. Lấy dữ liệu từ hàm bạn đã viết
     const params = window.getFilterParams();
@@ -966,10 +1017,19 @@ window.updateCrawlerStatus = function (data) {
         cpdStatus.innerText = status;
         cpdStatus.style.color = isError ? '#dc2626' : '#1e293b';
     }
-    if (cpdSub && total > 0) {
-        cpdSub.innerText = `Tìm thấy tổng cộng ${total} hóa đơn`;
+    if (cpdSub) {
+        // Chỉ cập nhật khi có total thực sự hoặc khi search kết thúc (isDone)
+        if (total > 0) {
+            cpdSub.innerText = `Tìm thấy tổng cộng ${total} hóa đơn`;
+        } else if (isDone) {
+            cpdSub.innerText = 'Không tìm thấy hóa đơn nào';
+        }
+        // Nếu total = 0 VÀ chưa done → giữ nguyên text cũ (không ghi đè)
     }
-    if (cpdCount) cpdCount.innerText = total || 0;
+    if (cpdCount) {
+        if (total > 0) cpdCount.innerText = total;
+        else if (isDone) cpdCount.innerText = 0;
+    }
     if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';
     if (cpdDone) cpdDone.style.display = isDone ? 'flex' : 'none';
     if (cpdError) cpdError.style.display = isError ? 'flex' : 'none';

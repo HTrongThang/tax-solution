@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -52,8 +52,8 @@ namespace Frontend.Views
 
                     try
                     {
-                        // Giải mã mật khẩu (Sử dụng hàm AES của Thắng)
-                        string p = GiaiMaAES(encryptedPass);
+                        // Giải mã mật khẩu bằng DPAPI (chỉ user Windows hiện tại mới giải được)
+                        string p = UnprotectPassword(encryptedPass);
 
                         string fillScript = $@"
                     if(document.getElementById('user')) document.getElementById('user').value = '{u}';
@@ -64,7 +64,9 @@ namespace Frontend.Views
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine("Lỗi giải mã: " + ex.Message);
+                        // Nếu giải mã thất bại (ví dụ: dữ liệu cũ dùng AES), xóa settings để user nhập lại
+                        Console.WriteLine("Lỗi giải mã (có thể do dữ liệu cũ): " + ex.Message);
+                        XoaSettings();
                     }
                 }
             };
@@ -78,7 +80,6 @@ namespace Frontend.Views
         }
         private async void CoreWebView2_WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
-            string NavigationCompletedjsonRaw = e.TryGetWebMessageAsString();
             string jsonRaw = e.TryGetWebMessageAsString();
             try
             {
@@ -99,7 +100,7 @@ namespace Frontend.Views
                         string founderHash = "0e398941913d4b5479819dd6fc8e35c168cd00c4b5a11f602d5b09f02cd61448";
 
                         bool isFounder = (user == "Founder" && hashedInput == founderHash);
-                        bool isValidUser = ValidateUserFromJson(user, hashedInput);
+                        bool isValidUser = await ValidateUserFromJson(user, hashedInput);
 
                         if (isFounder || isValidUser)
                         {
@@ -123,7 +124,7 @@ namespace Frontend.Views
                             // C. Xử lý ghi nhớ mật khẩu (Lưu xuống file settings)
                             if (remember)
                             {
-                                LuuVaoSettings(user, MaHoaAES(pass));
+                                LuuVaoSettings(user, ProtectPassword(pass));
                             }
                             else
                             {
@@ -167,7 +168,7 @@ namespace Frontend.Views
                         string hashedPass = ComputeHash(p);
 
                         // Thực thi lưu vào file JSON hệ thống
-                        LuuUserVaoFileJson(u, hashedPass);
+                        await LuuUserVaoFileJson(u, hashedPass);
 
                         await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Thành công', 'Đã thêm tài khoản mới vào hệ thống!', 'success')");
                     }
@@ -180,7 +181,7 @@ namespace Frontend.Views
                 MessageBox.Show("Hệ thống gặp sự cố khi xử lý dữ liệu: " + ex.Message, "Thông báo lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
-        private void LuuUserVaoFileJson(string u, string p)
+        private async Task LuuUserVaoFileJson(string u, string p)
         {
             try
             {
@@ -189,7 +190,7 @@ namespace Frontend.Views
 
                 if (File.Exists(path))
                 {
-                    string oldData = File.ReadAllText(path);
+                    string oldData = await File.ReadAllTextAsync(path);
                     users = JsonSerializer.Deserialize<List<dynamic>>(oldData) ?? new List<dynamic>();
                 }
 
@@ -203,44 +204,24 @@ namespace Frontend.Views
                 });
 
                 string jsonString = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(path, jsonString);
+                await File.WriteAllTextAsync(path, jsonString);
 
-                // Bắn thông báo về giao diện Web của Thắng
-                webView21.CoreWebView2.ExecuteScriptAsync($"showAlert('Thành công', 'Đã cấp quyền cho {u}', 'success')");
+                // Bắn thông báo về giao diện Web
+                await webView21.CoreWebView2.ExecuteScriptAsync($"showAlert('Thành công', 'Đã cấp quyền cho {u}', 'success')");
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Lỗi lưu user: " + ex.Message);
             }
         }
-        private void NavigateToPage(string folder, string fileName)
-        {
-            // Xác định đường dẫn thư mục gốc của App
-            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-
-            // Kết hợp đường dẫn đến file HTML trong folder WebResources
-            // Ví dụ: WebResources/Admin/manage_users.html
-            string filePath = Path.Combine(appDirectory, "WebResources", folder, fileName);
-
-            if (File.Exists(filePath))
-            {
-                // Nếu file tồn tại, bảo WebView2 mở nó lên
-                webView21.CoreWebView2.Navigate(new Uri(filePath).AbsoluteUri);
-            }
-            else
-            {
-                // Nếu không thấy file, báo lỗi để Thắng kiểm tra lại folder
-                MessageBox.Show($"Lỗi: Không tìm thấy file tại đường dẫn: {filePath}", "Lỗi file");
-            }
-        }
-        private bool ValidateUserFromJson(string user, string pass)
+        private async Task<bool> ValidateUserFromJson(string user, string pass)
         {
             string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "users.json");
 
             // Nếu file chưa tồn tại (chưa có ai được tạo) thì trả về false luôn
             if (!File.Exists(filePath)) return false;
 
-            string json = File.ReadAllText(filePath);
+            string json = await File.ReadAllTextAsync(filePath);
             using (JsonDocument doc = JsonDocument.Parse(json))
             {
                 // Duyệt qua danh sách user trong file JSON
@@ -285,54 +266,25 @@ namespace Frontend.Views
                 return builder.ToString();
             }
         }
-        public static string MaHoaAES(string plainText)
+        /// <summary>
+        /// Mã hóa mật khẩu bằng Windows DPAPI.
+        /// Chỉ user Windows hiện tại mới có thể giải mã — không cần lưu key/IV.
+        /// </summary>
+        public static string ProtectPassword(string plainText)
         {
-            string key = "1234567890123456"; // Phải đủ 16 ký tự (128 bit)
-            string iv = "abcdefghijklmnop";  // Phải đủ 16 ký tự
-
-            using (Aes aesAlg = Aes.Create())
-            {
-                aesAlg.Key = Encoding.UTF8.GetBytes(key);
-                aesAlg.IV = Encoding.UTF8.GetBytes(iv);
-
-                ICryptoTransform encryptor = aesAlg.CreateEncryptor(aesAlg.Key, aesAlg.IV);
-
-                using (MemoryStream msEncrypt = new MemoryStream())
-                {
-                    using (CryptoStream csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
-                    {
-                        using (StreamWriter swEncrypt = new StreamWriter(csEncrypt))
-                        {
-                            swEncrypt.Write(plainText);
-                        }
-                        return Convert.ToBase64String(msEncrypt.ToArray());
-                    }
-                }
-            }
+            byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+            byte[] encryptedBytes = ProtectedData.Protect(plainBytes, null, DataProtectionScope.CurrentUser);
+            return Convert.ToBase64String(encryptedBytes);
         }
-        public static string GiaiMaAES(string cipherText)
+
+        /// <summary>
+        /// Giải mã mật khẩu đã được bảo vệ bằng DPAPI.
+        /// </summary>
+        public static string UnprotectPassword(string cipherText)
         {
-            string key = "1234567890123456"; // Trùng với hàm mã hóa
-            string iv = "abcdefghijklmnop";  // Trùng với hàm mã hóa
-
-            using (Aes aesAlg = Aes.Create())
-            {
-                aesAlg.Key = Encoding.UTF8.GetBytes(key);
-                aesAlg.IV = Encoding.UTF8.GetBytes(iv);
-
-                ICryptoTransform decryptor = aesAlg.CreateDecryptor(aesAlg.Key, aesAlg.IV);
-
-                using (MemoryStream msDecrypt = new MemoryStream(Convert.FromBase64String(cipherText)))
-                {
-                    using (CryptoStream csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read))
-                    {
-                        using (StreamReader srDecrypt = new StreamReader(csDecrypt))
-                        {
-                            return srDecrypt.ReadToEnd();
-                        }
-                    }
-                }
-            }
+            byte[] encryptedBytes = Convert.FromBase64String(cipherText);
+            byte[] plainBytes = ProtectedData.Unprotect(encryptedBytes, null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(plainBytes);
         }
     }
 }
