@@ -127,28 +127,37 @@ func (s *CrawlerService) GetCaptcha() (string, error) {
 		return "", fmt.Errorf("trình duyệt chưa mở")
 	}
 
-	var encoded string
-	err := rod.Try(func() {
-		// 1. Chờ Dialog hiện lên hẳn
-		s.Page.Timeout(5 * time.Second).MustElement(".ant-modal-content").MustWaitVisible()
+	// Retry tối đa 3 lần
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		var encoded string
+		err := rod.Try(func() {
+			// 1. Chờ Dialog hiện lên hẳn
+			s.Page.Timeout(10 * time.Second).MustElement(".ant-modal-content").MustWaitVisible()
 
-		// 2. Tìm ảnh captcha
-		el := s.Page.Timeout(5 * time.Second).MustElement(".ant-modal-content img.Captcha__Image-sc-1up1k1e-1")
+			// 2. Tìm ảnh captcha
+			el := s.Page.Timeout(10 * time.Second).MustElement(".ant-modal-content img.Captcha__Image-sc-1up1k1e-1")
 
-		// 3. Đợi ảnh render xong
-		el.MustWaitVisible()
-		time.Sleep(300 * time.Millisecond)
+			// 3. Đợi ảnh render xong
+			el.MustWaitVisible()
+			time.Sleep(500 * time.Millisecond)
 
-		// 4. Chụp ảnh và encode Base64
-		imgData := el.MustScreenshot("")
-		encoded = base64.StdEncoding.EncodeToString(imgData)
-	})
-	if err != nil {
-		return "", fmt.Errorf("không thể lấy captcha: %v", err)
+			// 4. Chụp ảnh vào thư mục tạm (tránh lỗi quyền ở Program Files)
+			tmpFile := filepath.Join(os.TempDir(), "taxsolution_captcha.png")
+			imgData := el.MustScreenshot(tmpFile)
+			encoded = base64.StdEncoding.EncodeToString(imgData)
+			os.Remove(tmpFile)
+		})
+		if err == nil && encoded != "" {
+			fmt.Println("✅ Đã lấy xong mã Captcha!")
+			return encoded, nil
+		}
+		lastErr = err
+		fmt.Printf("⚠️ Lần %d thất bại: %v\n", attempt, err)
+		time.Sleep(time.Duration(attempt) * time.Second)
 	}
 
-	fmt.Println("✅ Đã lấy xong mã Captcha!")
-	return encoded, nil
+	return "", fmt.Errorf("không thể lấy captcha sau 3 lần: %v", lastErr)
 }
 func (c *CrawlerService) Login(user, pass, captcha string) error {
 	fmt.Println("🚀 Đang thực hiện đăng nhập (Chế độ kiểm soát nghiêm ngặt)...")
@@ -236,7 +245,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	c.SetupBrowserDownload()
 
 	if stream != nil {
-		stream <- models.StreamData{Status: "🚀 Đang khởi động bot...", IsDone: false}
+		stream <- models.StreamData{Status: "🚀 Đang khởi động ứng dụng...", IsDone: false}
 	}
 
 	defer func() {
@@ -676,7 +685,7 @@ func (c *CrawlerService) CrawlAllPages() {
 	// 1. Khởi tạo trạng thái bắt đầu
 	c.IsRunning = true
 	c.TotalInvoices = 0
-	c.CurrentStatus = "Bắt đầu khởi động bot..."
+	c.CurrentStatus = "Bắt đầu khởi động ứng dụng..."
 	c.GrantPermissions()
 
 	// Đảm bảo khi hàm kết thúc (xong hoặc lỗi) thì IsRunning phải về false

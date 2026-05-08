@@ -38,7 +38,6 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 	}
 }
 
-
 func (h *Handler) InitTaxPage(c *gin.Context) {
 	// Gọi hàm Init mới của Thu
 	err := h.Crawler.ShowLogin()
@@ -224,12 +223,12 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 	// 5. KÍCH HOẠT CHẠY NGẦM (GOROUTINE)
 	// Giải phóng cho Postman/ .NET ngay lập tức
 	go func() {
-		fmt.Printf("🤖 Bot bắt đầu làm việc ngầm. Kết quả sẽ lưu tại: %s\n", outputDir)
+		fmt.Printf("🤖 Hệ thống dụng bắt đầu làm việc ngầm. Kết quả sẽ lưu tại: %s\n", outputDir)
 
 		// Gọi hàm cào đa trang của Thắng
 		h.Crawler.CrawlAllPages()
 
-		fmt.Println("🏁 Bot đã hoàn thành toàn bộ hóa đơn!")
+		fmt.Println("🏁 Hệ thống đã hoàn thành toàn bộ hóa đơn!")
 	}()
 
 	// 6. Trả lời ngay cho người gọi
