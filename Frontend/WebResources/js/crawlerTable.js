@@ -235,7 +235,7 @@ window.closeCaptcha = function () {
 };
 
 window.handleLogout = function () {
-    // Báo cho C# biết là Thắng muốn Logout
+    // Báo cho C# biết người dùng muốn Logout
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({
             action: "REQUEST_LOGOUT"
@@ -250,7 +250,7 @@ window.submitCaptcha = function () {
     const code = inputCaptcha ? inputCaptcha.value : '';
     const mst = selectCompany ? selectCompany.value : '';
 
-    // 1. Kiểm tra đầu vào bằng hàm showAlert của Thắng
+    // 1. Kiểm tra đầu vào
     if (!mst) {
         return window.showAlert('Thông báo', 'Vui lòng chọn một công ty từ danh sách!', 'error');
     }
@@ -318,7 +318,7 @@ window.updateLoginStatus = function (isLoggedIn) {
 // Hàm trung gian điều hướng sự kiện
 window.handleAuthAction = function (btn) {
     if (btn.dataset.state === "logged-in") {
-        return handleLogoutClick(); // Gọi hàm Logout của bạn
+        return handleLogoutClick(); // Gọi hàm Logout
     }
 
     btn.disabled = true;
@@ -327,7 +327,7 @@ window.handleAuthAction = function (btn) {
     handleLoginClick(btn); // Gửi sang C#
 };
 window.handleLogoutClick = function () {
-    if (confirm("Thắng có chắc chắn muốn đăng xuất tài khoản thuế này không?")) {
+    if (confirm("Bạn có chắc chắn muốn đăng xuất tài khoản thuế này không?")) {
 
         // Disable nút + hiển thị loading
         const btn = document.getElementById('btn-auth');
@@ -398,7 +398,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // TRƯỜNG HỢP 2: Khoảng cách vượt quá 31 ngày (1 month)
         if (diffDaysInclusive > 31) {
-            window.showAlert('Giới hạn hệ thống', 'Hệ thống chỉ hỗ trợ tra cứu tối đa trong 1 tháng (31 ngày)!', 'info');
+            window.showAlert('Giới hạn hệ thống', 'Hệ thống chỉ hỗ trợ tra cứu tối đa trong 1 tháng (31 ngày)!', 'error');
 
             if (e.target.id === 'date-from') {
                 // Set "to" = from + 30 days (so inclusive range = 31 days)
@@ -434,7 +434,7 @@ window.getFilterParams = function () {
 };
 // Open detail modal (ensure function exists before renderInvoices uses it)
 window.openDetailModal = function (inv) {
-    debugger;
+
     if (!inv) return;
     const id = 'invoiceDetailModal';
     const existing = document.getElementById(id);
@@ -613,7 +613,7 @@ window.handleSearchClick = function () {
     // 2. Kiểm tra nhanh (Double check lần cuối cho an toàn)
     if (!params.fromDate || !params.toDate) {
         if (searchBtn) { searchBtn.disabled = false; searchBtn.style.opacity = '1'; searchBtn.style.cursor = 'pointer'; searchBtn.innerHTML = '🔍 Tìm kiếm'; }
-        return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian!', 'warning');
+        return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian!', 'error');
     }
 
 
@@ -1155,7 +1155,7 @@ async function handleExportXml(btn) {
                     }
                     showProgress(
                         'Đã chọn thư mục, đang gửi lệnh...',
-                        'Bot sẽ bắt đầu từ trang 1 sau khi nhận được lệnh...'
+                        'Hệ thống sẽ bắt đầu từ trang 1 sau khi nhận được lệnh...'
                     );
                     setProgressFolder(out);
                     btn.innerHTML = `<span class="text-sm">⏳</span> Đang gửi lệnh...`;
@@ -1171,7 +1171,7 @@ async function handleExportXml(btn) {
                 // Bước 2: Backend xác nhận đã nhận và bắt đầu chạy
                 if (action === 'START_CRAWL_ACK') {
                     showProgress(
-                        'Bot đang bắt đầu tải hóa đơn...',
+                        'Hệ thống đang bắt đầu tải hóa đơn...',
                         'Đang mở từng hóa đơn và tải file ZIP về...'
                     );
                     btn.innerHTML = `<span class="text-sm">⏳</span> Đang tải...`;
@@ -1182,7 +1182,7 @@ async function handleExportXml(btn) {
                 if (action === 'CRAWL_STATUS_UPDATE') {
                     const st = payload.status || payload.Status || '';
                     const total = payload.total_invoices || payload.TotalInvoices || 0;
-                    const sub = total > 0 ? `Đã xử lý được ${total} hóa đơn` : 'Bot đang khởi động...';
+                    const sub = total > 0 ? `Đã xử lý được ${total} hóa đơn` : 'Hệ thống đang khởi động...';
                     showProgress(st, sub);
                     setProgressCount(total);
                     btn.innerHTML = `<span class="text-sm">⏳</span> ${total > 0 ? total + ' HĐ' : 'Đang tải...'}`;

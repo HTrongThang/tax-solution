@@ -29,7 +29,7 @@ namespace Frontend.Views
         private string _currentCrawlRequestId;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
         private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
-        private readonly string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tax_accounts.json");
+        private readonly string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "tax_accounts.json");
         // Lock để đồng bộ truy cập file
         // Semaphore để đồng bộ truy cập file (thay lock để dùng được với async)
         private readonly SemaphoreSlim _fileSemaphore = new SemaphoreSlim(1, 1);
@@ -46,6 +46,9 @@ namespace Frontend.Views
         {
             this.Opacity = 0;
 
+            // Tạo thư mục AppData nếu chưa có
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+
             // Nạp dữ liệu công ty từ file vào RAM (async để không block UI)
             await LoadCompaniesToRAM();
 
@@ -55,8 +58,10 @@ namespace Frontend.Views
             this.StartPosition = FormStartPosition.Manual; // Chỉnh lại để CenterScreen ăn theo Location
             this.Location = new Point((screenRect.Width - this.Width) / 2, (screenRect.Height - this.Height) / 2);
 
-            // 2. Khởi tạo WebView2
-            await webViewUser.EnsureCoreWebView2Async();
+            // 2. Khởi tạo WebView2 (lưu cache vào AppData để tránh lỗi quyền)
+            var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
+            var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+            await webViewUser.EnsureCoreWebView2Async(env);
 
             // 3. Cấu hình Mapping (Đảm bảo folder WebResources tồn tại)
             string webResourcesPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebResources");
@@ -106,7 +111,7 @@ namespace Frontend.Views
                         System.Diagnostics.Debug.WriteLine("Lỗi kết nối Backend: " + ex.Message);
 
                         await webViewUser.CoreWebView2.ExecuteScriptAsync(
-                            $"window.showAlert('Lỗi kết nối', 'Không thể kết nối tới Service (localhost:8080). Vui lòng kiểm tra Backend!', 'error')"
+                            $"window.showAlert('Lỗi kết nối', 'Không thể kết nối tới Service. Vui lòng kiểm tra Service!', 'error')"
                         );
                     }
                     this.Opacity = 1; // Chỉ hiện khi đã nạp xong và đồng bộ header
@@ -289,6 +294,8 @@ namespace Frontend.Views
                         break;
                     }
 
+                    // Chờ dialog và captcha image trên trang thuế render xong
+                    await Task.Delay(1500);
                     await LoadCaptchaToUI();
                     break;
                 case "SUBMIT_CAPTCHA":

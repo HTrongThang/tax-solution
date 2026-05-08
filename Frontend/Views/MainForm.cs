@@ -27,8 +27,10 @@ namespace Frontend.Views
         {
             this.Opacity = 0;
 
-            // 1. Khởi tạo WebView2
-            await webView21.EnsureCoreWebView2Async();
+            // 1. Khởi tạo WebView2 (lưu cache vào AppData để tránh lỗi quyền)
+            var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
+            var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+            await webView21.EnsureCoreWebView2Async(env);
 
             // 2. Thiết lập Mapping thư mục ảo (Giải quyết triệt để lỗi Unsafe/Security)
             string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -185,7 +187,9 @@ namespace Frontend.Views
         {
             try
             {
-                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "users.json");
+                string appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution");
+                Directory.CreateDirectory(appDataDir);
+                string path = Path.Combine(appDataDir, "users.json");
                 List<dynamic> users = new List<dynamic>();
 
                 if (File.Exists(path))
@@ -216,7 +220,7 @@ namespace Frontend.Views
         }
         private async Task<bool> ValidateUserFromJson(string user, string pass)
         {
-            string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "users.json");
+            string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "users.json");
 
             // Nếu file chưa tồn tại (chưa có ai được tạo) thì trả về false luôn
             if (!File.Exists(filePath)) return false;

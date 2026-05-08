@@ -26,12 +26,12 @@ function postThemThanhVien() {
 
     // Kiểm tra dữ liệu đầu vào
     if (!u || !p || !cp) {
-        showAlert("Lỗi nhập liệu", "Vui lòng điền đầy đủ các thông tin nhân sự!", "error");
+        showAlert("Lỗi nhập liệu", "Vui lòng điền đầy đủ các trường bắt buộc!", "error");
         return;
     }
 
     if (p !== cp) {
-        showAlert("Mật khẩu không khớp", "Xác nhận mật khẩu không chính xác. Thắng kiểm tra lại nhé!", "error");
+        showAlert("Mật khẩu không khớp", "Xác nhận mật khẩu không chính xác. Vui lòng kiểm tra lại!", "error");
         return;
     }
 
@@ -46,7 +46,7 @@ function postThemThanhVien() {
         // Xóa trắng form sau khi gửi
         lamMoiForm();
 
-        showAlert("Thành công", "Đã gửi yêu cầu cấp quyền cho nhân viên mới!", "success");
+        showAlert("Thành công", "Đã gửi yêu cầu thêm nhân viên mới!", "success");
     } catch (err) {
         showAlert("Lỗi hệ thống", "Không thể kết nối với ứng dụng chính.", "error");
     }

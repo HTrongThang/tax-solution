@@ -184,11 +184,33 @@ namespace Frontend.Services
             // Improved SSE reader with cancellation support and better logging
             try
             {
-                DateTime startDate = DateTime.Parse(fromDate);
-                DateTime endDate = DateTime.Parse(toDate);
+                // Dùng ParseExact với format cố định để tránh lỗi do Regional Settings khác nhau giữa các máy
+                // (Máy VN: dd/MM/yyyy, Máy EN-US: MM/dd/yyyy → crash khi ngày > 12)
+                string fDate, tDate;
+                string trimmedFrom = fromDate.Trim();
+                string trimmedTo = toDate.Trim();
 
-                string fDate = startDate.ToString("dd/MM/yyyy");
-                string tDate = endDate.ToString("dd/MM/yyyy");
+                // Hỗ trợ cả 2 format phổ biến: dd/MM/yyyy và yyyy-MM-dd (ISO)
+                string[] supportedFormats = { "dd/MM/yyyy", "yyyy-MM-dd", "d/M/yyyy", "M/d/yyyy" };
+                var culture = System.Globalization.CultureInfo.InvariantCulture;
+
+                if (DateTime.TryParseExact(trimmedFrom, supportedFormats, culture, System.Globalization.DateTimeStyles.None, out DateTime startDate))
+                {
+                    fDate = startDate.ToString("dd/MM/yyyy", culture);
+                }
+                else
+                {
+                    fDate = trimmedFrom; // Fallback: giữ nguyên chuỗi gốc
+                }
+
+                if (DateTime.TryParseExact(trimmedTo, supportedFormats, culture, System.Globalization.DateTimeStyles.None, out DateTime endDate))
+                {
+                    tDate = endDate.ToString("dd/MM/yyyy", culture);
+                }
+                else
+                {
+                    tDate = trimmedTo; // Fallback: giữ nguyên chuỗi gốc
+                }
 
                 var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}";
                 using (var response = await _sseClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
