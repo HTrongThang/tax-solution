@@ -52,11 +52,8 @@ namespace Frontend.Views
             // Nạp dữ liệu công ty từ file vào RAM (async để không block UI)
             await LoadCompaniesToRAM();
 
-            // 1. Căn chỉnh kích thước
-            Rectangle screenRect = Screen.PrimaryScreen.WorkingArea;
-            this.Size = new Size((int)(screenRect.Width * 0.85), (int)(screenRect.Height * 0.85));
-            this.StartPosition = FormStartPosition.Manual; // Chỉnh lại để CenterScreen ăn theo Location
-            this.Location = new Point((screenRect.Width - this.Width) / 2, (screenRect.Height - this.Height) / 2);
+            // 1. Căn chỉnh kích thước: Full màn hình
+            this.WindowState = FormWindowState.Maximized;
 
             // 2. Khởi tạo WebView2 (lưu cache vào AppData để tránh lỗi quyền)
             var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
