@@ -45,8 +45,6 @@ function postThemThanhVien() {
 
         // Xóa trắng form sau khi gửi
         lamMoiForm();
-
-        showAlert("Thành công", "Đã gửi yêu cầu thêm nhân viên mới!", "success");
     } catch (err) {
         showAlert("Lỗi hệ thống", "Không thể kết nối với ứng dụng chính.", "error");
     }

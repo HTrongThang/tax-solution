@@ -27,7 +27,11 @@ namespace Frontend.Services
             Timeout = System.Threading.Timeout.InfiniteTimeSpan
         };
 
-        public async Task<string> Init() => await _client.GetStringAsync("/api/tax/init");
+        public async Task<string> Init()
+        {
+            var response = await _client.GetAsync("/api/tax/init");
+            return await response.Content.ReadAsStringAsync();
+        }
 
         // Mở dialog đăng nhập trên tab hiện tại (sau logout, không mở tab mới)
         public async Task<(string status, string message)> ShowLoginDialogAsync()
@@ -179,7 +183,7 @@ namespace Frontend.Services
             }
         }
 
-        public async Task SearchInvoicesSSE(string fromDate, string toDate, Action<StreamData> onProgress, System.Threading.CancellationToken cancellationToken = default)
+        public async Task SearchInvoicesSSE(string fromDate, string toDate, string invoiceType = "ban_ra", string invoiceCategory = "dien_tu", Action<StreamData> onProgress = null, System.Threading.CancellationToken cancellationToken = default)
         {
             // Improved SSE reader with cancellation support and better logging
             try
@@ -212,7 +216,9 @@ namespace Frontend.Services
                     tDate = trimmedTo; // Fallback: giữ nguyên chuỗi gốc
                 }
 
-                var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}";
+                string safeType = Uri.EscapeDataString(string.IsNullOrEmpty(invoiceType) ? "ban_ra" : invoiceType);
+                string safeCat = Uri.EscapeDataString(string.IsNullOrEmpty(invoiceCategory) ? "dien_tu" : invoiceCategory);
+                var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}&type={safeType}&category={safeCat}";
                 using (var response = await _sseClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
                 {
                     // Xử lý riêng 409 Conflict (hệ thống đang bận)
@@ -338,6 +344,19 @@ namespace Frontend.Services
             catch (Exception ex)
             {
                 return ("error", $"Lỗi kết nối khi gọi StartCrawl: {ex.Message}");
+            }
+        }
+
+        public async Task StopTaxAsync()
+        {
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await _client.PostAsync("/api/tax/stop", null, cts.Token);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("StopTaxAsync error: " + ex.Message);
             }
         }
     }

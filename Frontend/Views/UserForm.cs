@@ -29,12 +29,13 @@ namespace Frontend.Views
         private string _currentCrawlRequestId;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
         private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
-        private readonly string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "tax_accounts.json");
-        // Lock để đồng bộ truy cập file
-        // Semaphore để đồng bộ truy cập file (thay lock để dùng được với async)
-        private readonly SemaphoreSlim _fileSemaphore = new SemaphoreSlim(1, 1);
+        // Lưu trữ danh sách hóa đơn hiện tại trong RAM C# (chỉ giữ 1 công ty đang làm việc)
+        private List<dynamic> _currentInvoicesRAM = new List<dynamic>();
+        // Quản lý cơ sở dữ liệu SQLite cục bộ
+        private readonly DatabaseService _databaseService = new DatabaseService();
         // Semaphore để tuần tự hóa các lệnh ExecuteScriptAsync tới WebView2
         private readonly SemaphoreSlim _webviewSemaphore = new SemaphoreSlim(1, 1);
+        private bool _isForceClosing = false;
         public UserForm()
         {
             InitializeComponent();
@@ -46,10 +47,8 @@ namespace Frontend.Views
         {
             this.Opacity = 0;
 
-            // Tạo thư mục AppData nếu chưa có
-            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-
-            // Nạp dữ liệu công ty từ file vào RAM (async để không block UI)
+            // Khởi tạo SQLite DB và nạp dữ liệu công ty vào RAM (async để không block UI)
+            await _databaseService.InitializeAsync();
             await LoadCompaniesToRAM();
 
             // 1. Căn chỉnh kích thước: Full màn hình
@@ -164,6 +163,8 @@ namespace Frontend.Views
             switch (action)
             {
                 case "LOGOUT":
+                case "FORCE_EXIT":
+                    _isForceClosing = true;
                     this.Invoke(new Action(() =>
                     {
                         this.Close();
@@ -199,8 +200,8 @@ namespace Frontend.Views
                         }
                         _cachedCompanies.Add(newCompany);
 
-                        // 4. GHI FILE: Thực hiện ghi xuống ổ cứng để lưu trữ lâu dài (thread-safe)
-                        await WriteCompaniesToFile(_cachedCompanies);
+                        // 4. LƯU SQLITE: Thực hiện ghi xuống database SQLite (đã mã hóa DPAPI an toàn)
+                        await _databaseService.UpsertAccountAsync(newCompany);
 
                         // 5. PHẢN HỒI GIAO DIỆN: Gom lệnh để chạy cực nhanh
                         // Vừa hiện alert đẹp, vừa đóng modal thêm mới (nếu có), vừa render lại dropdown
@@ -244,9 +245,8 @@ namespace Frontend.Views
                             }
                         }
 
-                        // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
-                        // 2. GHI FILE: Cập nhật lại ổ cứng sau khi đã xóa trên RAM
-                        await WriteCompaniesToFile(_cachedCompanies);
+                        // 2. XÓA TRONG SQLITE: Cập nhật lại database sau khi đã xóa trên RAM
+                        await _databaseService.DeleteAccountAsync(mstToDelete);
 
                         // 3. PHẢN HỒI GIAO DIỆN: Gom lệnh để Web cập nhật ngay lập tức
                         string jsDeleteSuccess = $@"
@@ -273,7 +273,7 @@ namespace Frontend.Views
                     }
                     break;
                 case "GET_SETTINGS_DATA":
-                    await SendJsonDataToWeb(filePath);
+                    await SendSettingsDataToWeb();
                     break;
                 case "REFRESH_CAPTCHA":
                     await LoadCaptchaToUI();
@@ -314,33 +314,79 @@ namespace Frontend.Views
 
                         if (loginStatus == "success")
                         {
-                            // 1. Cập nhật UI ngay lập tức (Không đợi)
-                            string jsUpdate = "(function() { if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true); })();";
+                            // Cập nhật UI ngay lập tức và hiển thị thông báo thành công đẹp mắt
+                            string safeMst = JsonConvert.ToString(selectedMst);
+                            string safeSuccessMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công!");
+                            string jsUpdate = $"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true, {safeMst}); if(window.showAlert) window.showAlert('Thành công', {safeSuccessMsg}, 'success'); }})();";
                             _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsUpdate);
-
-                            // 2. Delay một chút xíu (100ms) để UI kịp vẽ xong chữ 'Đăng xuất' rồi mới hiện Box
-                            await Task.Delay(100);
-                            MessageBox.Show("Đăng nhập trang thuế thành công!", "Thành công", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         }
                         else
                         {
-                            string safeMsg = (loginMessage ?? "").Replace("'", "\\'").Replace("\n", " ");
+                            string rawMsg = loginMessage ?? "";
+                            string lowerMsg = rawMsg.ToLower();
 
-                            // Luôn đảm bảo nút được mở khóa nếu thất bại
-                            string jsReset = $"(function() {{ if(window.updateLoginStatus) window.updateLoginStatus(false); }})();";
+                            // Phân biệt chính xác giữa lỗi tài khoản/mật khẩu và lỗi captcha
+                            bool isCredentialsError = loginStatus == "error_credentials"
+                                || rawMsg.Contains("SAI_THONG_TIN")
+                                || lowerMsg.Contains("tên đăng nhập")
+                                || lowerMsg.Contains("mật khẩu")
+                                || lowerMsg.Contains("tài khoản");
 
-                            if (loginStatus == "error_captcha")
+                            bool isCaptchaError = !isCredentialsError && (
+                                loginStatus == "error_captcha"
+                                || rawMsg.Contains("SAI_CAPTCHA")
+                                || lowerMsg.Contains("captcha")
+                                || lowerMsg.Contains("mã xác nhận")
+                                || lowerMsg.Contains("mã xác thực")
+                                || lowerMsg.Contains("mã bảo vệ")
+                                || lowerMsg.Contains("mã kiểm tra"));
+
+                            if (isCredentialsError)
                             {
-                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsReset);
-                                MessageBox.Show($"Mã Captcha không chính xác: {safeMsg}", "Sai Captcha", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                // Sai tài khoản / mật khẩu: Đóng popup captcha vì nhập lại captcha cũng vô ích
+                                string displayMsg = rawMsg
+                                    .Replace("SAI_THONG_TIN:", "")
+                                    .Replace("LOI_DANG_NHAP:", "")
+                                    .Replace("SAI_CAPTCHA:", "")
+                                    .Trim();
+                                if (string.IsNullOrEmpty(displayMsg))
+                                    displayMsg = "Tên đăng nhập hoặc mật khẩu không đúng.";
+                                
+                                if (!displayMsg.ToLower().Contains("kiểm tra lại"))
+                                    displayMsg += " Vui lòng kiểm tra lại mật khẩu doanh nghiệp trong phần mềm!";
 
-                                // Nạp captcha mới ngầm
-                                _ = LoadCaptchaToUI();
+                                string safeMsg = JsonConvert.ToString(displayMsg);
+                                string jsErr = $"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(false); if(window.showAlert) window.showAlert('Sai thông tin đăng nhập', {safeMsg}, 'error'); }})();";
+                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsErr);
+                            }
+                            else if (isCaptchaError)
+                            {
+                                // Sai Captcha: Giữ mở popup, làm trống ô nhập và nạp lại Captcha mới
+                                string displayMsg = rawMsg
+                                    .Replace("SAI_CAPTCHA:", "")
+                                    .Replace("LOI_DANG_NHAP:", "")
+                                    .Trim();
+                                if (string.IsNullOrEmpty(displayMsg)) displayMsg = "Mã Captcha không chính xác, vui lòng nhập lại!";
+                                string safeCaptchaMsg = JsonConvert.ToString(displayMsg);
+
+                                string jsReset = $"(function() {{ const inp = document.getElementById('input-captcha'); if(inp) {{ inp.disabled = false; inp.value = ''; inp.focus(); }} if(window.showAlert) window.showAlert('Sai Captcha', {safeCaptchaMsg}, 'warning'); }})();";
+                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsReset);
+
+                                await Task.Delay(400);
+                                await LoadCaptchaToUI();
                             }
                             else
                             {
-                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsReset);
-                                MessageBox.Show($"Lỗi: {safeMsg}", "Lỗi đăng nhập", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                // Lỗi khác (Hệ thống, mất kết nối, quá thời gian chờ...)
+                                string displayMsg = rawMsg
+                                    .Replace("LOI_DANG_NHAP:", "")
+                                    .Replace("SAI_CAPTCHA:", "")
+                                    .Trim();
+                                if (string.IsNullOrEmpty(displayMsg)) displayMsg = "Đăng nhập thất bại. Vui lòng thử lại!";
+                                string safeErrMsg = JsonConvert.ToString(displayMsg);
+
+                                string jsErr = $"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(false); if(window.showAlert) window.showAlert('Lỗi đăng nhập', {safeErrMsg}, 'error'); }})();";
+                                _ = webViewUser.CoreWebView2.ExecuteScriptAsync(jsErr);
                             }
                         }
                     }
@@ -349,7 +395,8 @@ namespace Frontend.Views
                         // Giải phóng nút khi có crash code
                         _ = webViewUser.CoreWebView2.ExecuteScriptAsync("if(window.updateLoginStatus) window.updateLoginStatus(false);");
                         System.Diagnostics.Debug.WriteLine("CRITICAL ERROR: " + ex.Message);
-                        MessageBox.Show("Lỗi hệ thống: " + ex.Message, "Hệ thống", MessageBoxButtons.OK, MessageBoxIcon.Stop);
+                        string safeCritMsg = JsonConvert.ToString("Lỗi hệ thống: " + ex.Message);
+                        _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.showAlert) window.showAlert('Lỗi hệ thống', {safeCritMsg}, 'error');");
                     }
                     break;
                 // Trong phần xử lý Message từ WebView2
@@ -382,6 +429,8 @@ namespace Frontend.Views
                     {
                         string fromDate = packet.data.fromDate;
                         string toDate = packet.data.toDate;
+                        string invoiceType = packet.data.invoiceType != null ? (string)packet.data.invoiceType : "ban_ra";
+                        string invoiceCategory = packet.data.invoiceCategory != null ? (string)packet.data.invoiceCategory : "dien_tu";
 
                         if (string.IsNullOrEmpty(fromDate) || string.IsNullOrEmpty(toDate))
                         {
@@ -394,7 +443,7 @@ namespace Frontend.Views
                         _searchCts = new CancellationTokenSource();
 
                         // Start new search with cancellation support
-                        _ = HandleInvoiceSearchStream(fromDate, toDate, _searchCts.Token);
+                        _ = HandleInvoiceSearchStream(fromDate, toDate, invoiceType, invoiceCategory, _searchCts.Token);
                     }
                     catch (Exception ex)
                     {
@@ -402,9 +451,12 @@ namespace Frontend.Views
                     }
                     break;
                 case "CANCEL_SEARCH":
+                case "CANCEL_CRAWL":
                     try
                     {
                         _searchCts?.Cancel();
+                        _isCrawling = false;
+                        _ = _taxService.StopTaxAsync();
                     }
                     catch { }
                     break;
@@ -494,43 +546,172 @@ namespace Frontend.Views
                     await HandleStartCrawl(outputDir, requestId);
                     break;
 
+                case "EXPORT_EXCEL":
+                    try
+                    {
+                        string excelRequestId = packet?.requestId != null ? packet.requestId.ToString() : null;
+                        string reportType = packet?.data?.reportType != null ? packet.data.reportType.ToString() : "bao_cao_tong_hop";
+                        string invoicesJsonRaw = packet?.data?.invoices != null ? packet.data.invoices.ToString() : "[]";
+                        bool excelIsMuaVao = packet?.data?.isMuaVao != null && (bool)packet.data.isMuaVao;
+                        string excelFromDate = packet?.data?.fromDate != null ? packet.data.fromDate.ToString() : "";
+                        string excelToDate = packet?.data?.toDate != null ? packet.data.toDate.ToString() : "";
+                        string excelMst = packet?.data?.mst != null ? packet.data.mst.ToString() : "MST";
+
+                        // Mở SaveFileDialog trên UI Thread
+                        this.Invoke(new Action(async () =>
+                        {
+                            try
+                            {
+                                string dirLabel = excelIsMuaVao ? "MuaVao" : "BanRa";
+                                string defaultFileName = $"BaoCaoTongHop_{dirLabel}_{excelMst}.xlsx";
+
+                                using var sfd = new SaveFileDialog
+                                {
+                                    Title = "Chọn nơi lưu file Excel báo cáo tổng hợp",
+                                    Filter = "Excel Files (*.xlsx)|*.xlsx",
+                                    FileName = defaultFileName,
+                                    DefaultExt = "xlsx",
+                                    OverwritePrompt = true
+                                };
+
+                                if (sfd.ShowDialog() != DialogResult.OK)
+                                {
+                                    // Người dùng bấm Cancel
+                                    var cancelPayload = new
+                                    {
+                                        action = "EXPORT_EXCEL_ERROR",
+                                        message = "Người dùng đã hủy chọn nơi lưu.",
+                                        requestId = excelRequestId
+                                    };
+                                    await PostWebMessageAsJson(cancelPayload);
+                                    return;
+                                }
+
+                                string selectedPath = sfd.FileName;
+                                string selectedDir = Path.GetDirectoryName(selectedPath);
+
+                                // Thông báo đang xử lý
+                                var processingPayload = new
+                                {
+                                    action = "EXPORT_EXCEL_PROCESSING",
+                                    message = "Đang tạo file Excel...",
+                                    requestId = excelRequestId
+                                };
+                                await PostWebMessageAsJson(processingPayload);
+
+                                // Chạy xuất Excel trên background thread để không block UI
+                                await Task.Run(() =>
+                                {
+                                    var exportService = new ExportExcelService();
+                                    exportService.ExportBaoCaoTongHop(
+                                        invoicesJsonRaw,
+                                        selectedDir,
+                                        excelIsMuaVao,
+                                        excelFromDate,
+                                        excelToDate,
+                                        excelMst
+                                    );
+                                });
+
+                                // Thành công
+                                var successPayload = new
+                                {
+                                    action = "EXPORT_EXCEL_DONE",
+                                    message = "Xuất Excel thành công!",
+                                    filePath = selectedPath,
+                                    requestId = excelRequestId
+                                };
+                                await PostWebMessageAsJson(successPayload);
+
+                                // Tự mở file Excel nếu người dùng muốn
+                                try { Process.Start(new ProcessStartInfo(selectedPath) { UseShellExecute = true }); }
+                                catch { /* Bỏ qua nếu không mở được */ }
+                            }
+                            catch (Exception exInner)
+                            {
+                                Debug.WriteLine("Lỗi EXPORT_EXCEL (inner): " + exInner.Message);
+                                var errorPayload = new
+                                {
+                                    action = "EXPORT_EXCEL_ERROR",
+                                    message = "Lỗi xuất Excel: " + exInner.Message,
+                                    requestId = excelRequestId
+                                };
+                                await PostWebMessageAsJson(errorPayload);
+                            }
+                        }));
+                    }
+                    catch (Exception exOuter)
+                    {
+                        Debug.WriteLine("Lỗi EXPORT_EXCEL (outer): " + exOuter.Message);
+                    }
+                    break;
+
             }
         }
-        private async Task SendJsonDataToWeb(string filePath)
+        private async Task SendSettingsDataToWeb()
         {
             try
             {
-                if (File.Exists(filePath))
-                {
-                    string jsonData = await File.ReadAllTextAsync(filePath);
-                    string safeJson = JsonConvert.ToString(jsonData);
-                    await ExecuteScriptSerializedAsync($"window.loadInitialData({safeJson})");
-                }
+                // Gửi danh sách công ty từ cache SQLite lên giao diện Web
+                string jsonData = JsonConvert.SerializeObject(_cachedCompanies ?? new List<CompanyModel>());
+                string safeJson = JsonConvert.ToString(jsonData);
+                await ExecuteScriptSerializedAsync($"window.loadInitialData({safeJson})");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("Lỗi bắn dữ liệu: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("Lỗi bắn dữ liệu Settings: " + ex.Message);
             }
         }
         private void UserForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            // Hỏi xác nhận trước khi đóng app
-            var result = MessageBox.Show(
-                "Bạn có chắc muốn thoát? Tất cả chương trình đang chạy sẽ bị đóng.",
-                "Xác nhận thoát",
-                MessageBoxButtons.YesNo,
-                MessageBoxIcon.Question
-            );
-
-            if (result == DialogResult.No)
+            if (_isForceClosing)
             {
-                e.Cancel = true; // Hủy đóng
                 return;
+            }
+
+            // Hủy sự kiện đóng mặc định của Windows
+            e.Cancel = true;
+
+            // Gọi modal xác nhận thoát đẹp mắt trong WebView2
+            try
+            {
+                if (webViewUser?.CoreWebView2 != null)
+                {
+                    _ = webViewUser.CoreWebView2.ExecuteScriptAsync(
+                        "if (typeof window.showConfirm === 'function') { " +
+                        "    window.showConfirm({ " +
+                        "        title: 'Xác nhận thoát', " +
+                        "        message: 'Bạn có chắc muốn thoát? Tất cả chương trình đang chạy sẽ bị đóng.', " +
+                        "        confirmText: 'THOÁT NGAY', " +
+                        "        cancelText: 'HỦY', " +
+                        "        type: 'logout', " +
+                        "        onConfirm: function() { " +
+                        "            window.chrome.webview.postMessage({ action: 'FORCE_EXIT' }); " +
+                        "        } " +
+                        "    }); " +
+                        "} else { " +
+                        "    window.chrome.webview.postMessage({ action: 'FORCE_EXIT' }); " +
+                        "}"
+                    );
+                }
+                else
+                {
+                    _isForceClosing = true;
+                    this.Close();
+                }
+            }
+            catch
+            {
+                _isForceClosing = true;
+                this.Close();
             }
         }
 
         private async void UserForm_FormClosed(object sender, FormClosedEventArgs e)
         {
+            // Giải phóng bộ nhớ RAM hóa đơn
+            InvoiceMemoryService.Instance.Clear("Đóng ứng dụng");
+
             // Đóng Chrome hoàn toàn khi thoát app
             await _taxService.ShutdownAsync();
 
@@ -600,24 +781,30 @@ namespace Frontend.Views
         {
             try
             {
-                if (File.Exists(filePath))
-                {
-                    string jsonContent = await File.ReadAllTextAsync(filePath);
-                    _cachedCompanies = JsonConvert.DeserializeObject<List<CompanyModel>>(jsonContent) ?? new List<CompanyModel>();
-                    System.Diagnostics.Debug.WriteLine($">>> RAM: Đã nạp {_cachedCompanies.Count} công ty.");
-                }
+                _cachedCompanies = await _databaseService.GetAllAccountsAsync();
+                System.Diagnostics.Debug.WriteLine($">>> SQLite: Đã nạp {_cachedCompanies.Count} công ty.");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("Lỗi nạp cache: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("Lỗi nạp cache từ SQLite: " + ex.Message);
             }
         }
-        private async Task HandleInvoiceSearchStream(string from, string to, CancellationToken cancellationToken = default)
+        private async Task HandleInvoiceSearchStream(string from, string to, string invoiceType = "ban_ra", string invoiceCategory = "dien_tu", CancellationToken cancellationToken = default)
         {
             try
             {
-                await _taxService.SearchInvoicesSSE(from, to, (progressData) =>
+                // Xóa RAM hóa đơn cũ trước khi nạp đợt mới
+                InvoiceMemoryService.Instance.Clear("Bắt đầu tìm kiếm đợt mới");
+                _currentInvoicesRAM.Clear();
+                await _taxService.SearchInvoicesSSE(from, to, invoiceType, invoiceCategory, (progressData) =>
                 {
+                    // Lưu hóa đơn vào RAM C# khi hoàn tất
+                    if (progressData.IsDone && progressData.Invoices != null)
+                    {
+                        InvoiceMemoryService.Instance.SetInvoices(from, progressData.Invoices);
+                        _currentInvoicesRAM = progressData.Invoices;
+                    }
+
                     // Marshal to UI thread and run async work safely
                     this.BeginInvoke((Action)(() =>
                     {
@@ -671,7 +858,8 @@ namespace Frontend.Views
             }
             else
             {
-                MessageBox.Show("Không thể bắt đầu: " + message);
+                string safeStartMsg = JsonConvert.ToString("Không thể bắt đầu: " + message);
+                await webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.showAlert) window.showAlert('Lỗi khởi động', {safeStartMsg}, 'error');");
                 var payload = new { action = "CRAWL_ERROR", message = message, requestId };
                 await PostWebMessageAsJson(payload);
             }
@@ -726,24 +914,7 @@ namespace Frontend.Views
             return Task.CompletedTask;
         }
 
-        // Helper: Thread-safe file write for tax_accounts.json
-        private async Task WriteCompaniesToFile(List<CompanyModel> companies)
-        {
-            try
-            {
-                await _fileSemaphore.WaitAsync();
-                string jsonOutput = JsonConvert.SerializeObject(companies, Formatting.Indented);
-                await File.WriteAllTextAsync(filePath, jsonOutput);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("WriteCompaniesToFile error: " + ex.Message);
-            }
-            finally
-            {
-                _fileSemaphore.Release();
-            }
-        }
+
 
     }
 }

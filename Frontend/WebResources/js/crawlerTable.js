@@ -1,3 +1,90 @@
+// Lưu trạng thái công ty đã chọn trên toàn ứng dụng
+window._selectedCompanyMst = window._selectedCompanyMst || null;
+window._loggedInMst = window._loggedInMst || null;
+
+// Cập nhật trạng thái nút xuất XML: chỉ cho phép bấm khi có dữ liệu
+window.updateExportXmlButtonState = function (hasData) {
+    const btn = document.getElementById('btn-export-xml');
+    if (btn) {
+        btn.disabled = !hasData;
+    }
+    const btnExcel = document.getElementById('btn-export-excel');
+    if (btnExcel) {
+        btnExcel.disabled = !hasData;
+    }
+};
+
+// ============================================================
+// BỘ NHỚ RAM QUẢN LÝ HÓA ĐƠN (IN-MEMORY INVOICE STORE)
+// Chỉ lưu trữ dữ liệu của 1 công ty duy nhất đang làm việc
+// ============================================================
+window._currentInvoicesRAM = []; // Biến RAM chính thức lưu toàn bộ danh sách hóa đơn
+window._invoiceCache = window._currentInvoicesRAM; // Giữ tương thích ngược
+
+// 1. Nạp danh sách hóa đơn vào RAM
+window.setInvoiceRAM = function (invoices) {
+    window._currentInvoicesRAM = Array.isArray(invoices) ? invoices : [];
+    window._invoiceCache = window._currentInvoicesRAM;
+    console.log(`📥 [RAM] Đã lưu ${window._currentInvoicesRAM.length} hóa đơn vào RAM.`);
+    if (typeof window.updateExportXmlButtonState === 'function') {
+        window.updateExportXmlButtonState(window._currentInvoicesRAM.length > 0);
+    }
+};
+
+// 2. Đọc dữ liệu hóa đơn từ RAM (dùng cho phân trang, lọc, xuất Excel)
+window.getInvoiceRAM = function () {
+    return window._currentInvoicesRAM || [];
+};
+
+// Đảm bảo đối tượng InvoiceRamManager luôn tồn tại trên toàn cục
+window.InvoiceRamManager = window.InvoiceRamManager || {
+    set: function (invoices, mst) { window.setInvoiceRAM(invoices); },
+    get: function () { return window.getInvoiceRAM(); },
+    clear: function (reason) { window.clearInvoiceRAM(reason); },
+    count: function () { return (window._currentInvoicesRAM && window._currentInvoicesRAM.length) || 0; },
+    hasData: function () { return this.count() > 0; }
+};
+
+// 3. Giải phóng hoàn toàn bộ nhớ RAM
+window.clearInvoiceRAM = function (reason) {
+    if (reason) console.log("🧹 [RAM] Giải phóng bộ nhớ hóa đơn:", reason);
+
+    // Giải phóng mảng RAM lập tức cho Garbage Collector thu hồi
+    if (window._currentInvoicesRAM && Array.isArray(window._currentInvoicesRAM)) {
+        window._currentInvoicesRAM.length = 0;
+    }
+    window._currentInvoicesRAM = [];
+    if (window._invoiceCache && Array.isArray(window._invoiceCache)) {
+        window._invoiceCache.length = 0;
+    }
+    window._invoiceCache = [];
+
+    // Xóa sạch dữ liệu hiển thị trên bảng
+    const tableBody = document.getElementById('crawler-results-body');
+    if (tableBody) {
+        tableBody.innerHTML = `<tr><td colspan="7" class="py-20 text-center text-slate-300 italic">Chưa có dữ liệu để hiển thị</td></tr>`;
+    }
+
+    // Xóa các thanh phân trang
+    const pagination = document.getElementById('crawler-pagination');
+    if (pagination) pagination.innerHTML = '';
+    const paginationInfo = document.getElementById('crawler-pagination-info');
+    if (paginationInfo) paginationInfo.innerHTML = '';
+    const paginationContainer = document.getElementById('pagination-container');
+    if (paginationContainer) paginationContainer.innerHTML = '';
+
+    // Vô hiệu hóa nút xuất XML / Excel
+    if (typeof window.updateExportXmlButtonState === 'function') {
+        window.updateExportXmlButtonState(false);
+    }
+
+    // Reset các biến đếm trạng thái
+    const countEl = document.getElementById('cpd-count');
+    if (countEl) countEl.innerText = '0';
+    const statusEl = document.getElementById('cpd-status');
+    if (statusEl) statusEl.textContent = '';
+};
+
 // Hàm vẽ danh sách công ty vào Dropdown
 window.renderCompanyDropdown = function () {
     const selectCompany = document.getElementById('select-company');
@@ -8,16 +95,51 @@ window.renderCompanyDropdown = function () {
         return;
     }
 
+    // MST ưu tiên: đang đăng nhập > MST đã chọn trước đó > MST đầu tiên
+    const targetMst = window._loggedInMst || window._selectedCompanyMst;
+
     // Tạo HTML cho các option từ tempStorage
-    // Giả sử JSON trả về có trường { "taxCode": "...", "name": "..." }
-    const html = tempStorage.map(company => `
-        <option value="${company.mst}">
-            ${company.company || company.mst}
-        </option>
-    `).join('');
+    const html = tempStorage.map(company => {
+        const isSelected = (targetMst && String(company.mst) === String(targetMst)) ? 'selected' : '';
+        return `
+            <option value="${company.mst}" ${isSelected}>
+                ${company.company || company.mst}
+            </option>
+        `;
+    }).join('');
 
     selectCompany.innerHTML = html;
-    console.log("Hệ thống: Đã cập nhật danh sách công ty!");
+
+    // Nếu targetMst có trong danh sách thì chọn đúng MST đó
+    if (targetMst && Array.from(selectCompany.options).some(o => o.value === targetMst)) {
+        selectCompany.value = targetMst;
+    } else if (selectCompany.value) {
+        window._selectedCompanyMst = selectCompany.value;
+    }
+
+    // Nếu đang trong phiên đăng nhập thuế, khóa dropdown để tránh người dùng chọn nhầm công ty khác
+    if (window._isLoggedIn) {
+        selectCompany.disabled = true;
+        selectCompany.title = "Đang trong phiên làm việc. Vui lòng đăng xuất trước khi chuyển sang công ty khác.";
+    } else {
+        selectCompany.disabled = false;
+        selectCompany.title = "";
+    }
+
+    // Bắt sự kiện người dùng tự chuyển công ty trên dropdown để ghi nhớ & giải phóng RAM công ty cũ
+    selectCompany.onchange = function () {
+        const oldMst = window._selectedCompanyMst;
+        const newMst = this.value;
+        window._selectedCompanyMst = newMst;
+        if (oldMst && oldMst !== newMst) {
+            if (typeof window.clearInvoiceRAM === 'function') {
+                window.clearInvoiceRAM("Chuyển sang công ty MST: " + newMst);
+            }
+        }
+        console.log("AccOnline: Đã chọn công ty MST: " + this.value);
+    };
+
+    console.log("Hệ thống: Đã cập nhật danh sách công ty (MST đang chọn: " + selectCompany.value + ")");
 };
 
 // Receive messages from host (C#) via PostWebMessageAsJson
@@ -100,8 +222,21 @@ window.handleSseProgress = function (data) {
     // Update status box
     if (window.updateCrawlerStatus) window.updateCrawlerStatus(data);
 
+    // Reset watchdog timer whenever progress arrives (gia hạn thêm 90s)
+    if (window._searchWatchdogId) {
+        clearTimeout(window._searchWatchdogId);
+        window._searchWatchdogId = null;
+    }
+
     // Normalize fields
     const isDone = data && (data.is_done !== undefined ? data.is_done : (data.IsDone !== undefined ? data.IsDone : false));
+    if (!isDone) {
+        window._searchWatchdogId = setTimeout(() => {
+            console.warn('Search watchdog triggered (no progress for 90s) — finalizing UI');
+            if (window.finalizeSearchUI) window.finalizeSearchUI();
+        }, 90000);
+    }
+
     let invoices = data.invoices || data.Invoices || null;
     if (typeof invoices === 'string') {
         try { invoices = JSON.parse(invoices); } catch { invoices = null; }
@@ -112,18 +247,28 @@ window.handleSseProgress = function (data) {
 
     if (isDone) {
         if (Array.isArray(invoices) && invoices.length) {
+            // Nạp toàn bộ dữ liệu vào RAM
+            if (typeof window.setInvoiceRAM === 'function') {
+                window.setInvoiceRAM(invoices);
+            }
             // small delay to allow status UI to update first
             setTimeout(() => {
                 try { renderInvoices(invoices); }
                 catch (ex) { console.error('renderInvoices error', ex); }
                 // handle pagination (client-side if invoices present)
                 handlePagination({ invoices, totalItems: total, currentPage: 1, pageSize: 20 });
+                if (typeof window.updateExportXmlButtonState === 'function') {
+                    window.updateExportXmlButtonState(true);
+                }
                 if (window.finalizeSearchUI) window.finalizeSearchUI();
             }, 50);
         } else {
             // Không có hóa đơn → xóa sạch bảng cũ và hiện thông báo trống
             renderInvoices([]);
             handlePagination({ invoices: null, totalItems: 0, currentPage: 1, pageSize: 20 });
+            if (typeof window.updateExportXmlButtonState === 'function') {
+                window.updateExportXmlButtonState(false);
+            }
             if (window.finalizeSearchUI) window.finalizeSearchUI();
         }
     } else {
@@ -132,6 +277,9 @@ window.handleSseProgress = function (data) {
             try { renderInvoices(invoices); }
             catch (ex) { console.error('renderInvoices error', ex); }
             handlePagination({ invoices, totalItems: total, currentPage: 1, pageSize: 20 });
+            if (typeof window.updateExportXmlButtonState === 'function') {
+                window.updateExportXmlButtonState(true);
+            }
         }
     }
 };
@@ -145,7 +293,14 @@ window.finalizeSearchUI = function () {
             btn.disabled = false;
             btn.style.opacity = '1';
             btn.style.cursor = 'pointer';
-            btn.innerHTML = '🔍 Tìm kiếm';
+            btn.innerHTML = '<span>🔍</span><span>Bắt đầu tìm kiếm</span>';
+        }
+        const openSearchBtn = document.getElementById('btn-open-search');
+        if (openSearchBtn) {
+            openSearchBtn.disabled = false;
+            openSearchBtn.style.opacity = '1';
+            openSearchBtn.style.cursor = 'pointer';
+            openSearchBtn.innerHTML = '<span>🔍</span><span>Bộ lọc tra cứu</span>';
         }
 
         // Ẩn modal nếu đang hiển và chưa tự ẩn
@@ -158,6 +313,8 @@ window.finalizeSearchUI = function () {
                     modal.style.display = 'none';
                     modal.style.opacity = '1';
                     modal.style.transition = '';
+                    const cpdSub = document.getElementById('cpd-sub');
+                    if (cpdSub) cpdSub.innerText = '';
                 }, 380);
             }, 2500);
         }
@@ -209,6 +366,79 @@ window.handleCancelClick = function () {
         window.chrome.webview.postMessage({ action: 'CANCEL_SEARCH' });
     }
 };
+
+// Hủy tiến trình từ Modal tiến độ (Search hoặc Crawl)
+window.handleCancelCrawlModal = function (btn) {
+    const cancelBtn = btn || document.getElementById('btn-cancel-crawl-modal');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.innerHTML = `
+            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            <span>Đang hủy...</span>
+        `;
+    }
+
+    const cpdStatus = document.getElementById('cpd-status');
+    if (cpdStatus) {
+        cpdStatus.innerText = 'Đang dừng tiến trình theo yêu cầu...';
+        cpdStatus.style.color = '#e11d48';
+    }
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    if (cpdSubtitle) {
+        cpdSubtitle.innerText = 'Đang hủy...';
+    }
+
+    // Gửi lệnh hủy tới Backend C# & Go
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ action: 'CANCEL_SEARCH' });
+        window.chrome.webview.postMessage({ action: 'CANCEL_CRAWL' });
+    }
+
+    // Xử lý hủy các request đang chờ phản hồi (nếu đang trong luồng handleExportXml)
+    if (window._pendingWebviewRequests) {
+        Object.keys(window._pendingWebviewRequests).forEach(reqId => {
+            try {
+                const handler = window._pendingWebviewRequests[reqId];
+                if (typeof handler === 'function') {
+                    handler({ action: 'CRAWL_ERROR', message: 'Người dùng đã hủy tiến trình', requestId: reqId });
+                }
+            } catch (e) { }
+            delete window._pendingWebviewRequests[reqId];
+        });
+    }
+
+    // Khôi phục nút search nếu đang bị khóa
+    if (typeof window.finalizeSearchUI === 'function') {
+        window.finalizeSearchUI();
+    }
+
+    // Ẩn modal mượt mà sau 400ms
+    setTimeout(() => {
+        const modal = document.getElementById('crawl-progress-modal');
+        if (modal) {
+            modal.style.transition = 'opacity 0.3s ease';
+            modal.style.opacity = '0';
+            setTimeout(() => {
+                modal.style.display = 'none';
+                modal.style.opacity = '1';
+                modal.style.transition = '';
+                if (cancelBtn) {
+                    cancelBtn.disabled = false;
+                    cancelBtn.innerHTML = `
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        <span>Hủy tiến trình</span>
+                    `;
+                }
+            }, 300);
+        }
+        window.showAlert?.('Đã hủy', 'Đã dừng thao tác thành công!', 'info');
+    }, 400);
+};
 // Hàm 2: Chỉ làm nhiệm vụ hiển thị (C# sẽ gọi hàm này)
 window.openCaptcha = function (captchaBase64) {
     const modal = document.getElementById('captcha-modal');
@@ -230,8 +460,22 @@ window.openCaptcha = function (captchaBase64) {
 
 // Hàm đóng Popup
 window.closeCaptcha = function () {
-    document.getElementById('captcha-modal').classList.add('hidden');
-    document.getElementById('input-captcha').value = '';
+    const modal = document.getElementById('captcha-modal');
+    if (modal) modal.classList.add('hidden');
+    const input = document.getElementById('input-captcha');
+    if (input) {
+        input.value = '';
+        input.disabled = false;
+    }
+};
+
+// Hàm bấm đổi mã Captcha khác
+window.refreshCaptcha = function () {
+    const img = document.getElementById('img-captcha');
+    if (img) img.style.opacity = '0.5';
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ action: 'REFRESH_CAPTCHA' });
+    }
 };
 
 window.handleLogout = function () {
@@ -261,6 +505,7 @@ window.submitCaptcha = function () {
 
     // 2. Gửi tin nhắn về C#
     if (window.chrome && window.chrome.webview) {
+        window._selectedCompanyMst = mst;
         window.chrome.webview.postMessage({
             action: "SUBMIT_CAPTCHA",
             data: {
@@ -273,45 +518,60 @@ window.submitCaptcha = function () {
     if (inputCaptcha) inputCaptcha.disabled = true;
 };
 
-window.updateLoginStatus = function (isLoggedIn) {
+window.updateLoginStatus = function (isLoggedIn, loggedInMst = null) {
     const btn = document.getElementById('btn-auth');
-    if (!btn) return;
-
-    btn.disabled = false;
-    btn.style.opacity = "";
-    btn.style.cursor = "";
+    const selectCompany = document.getElementById('select-company');
 
     const baseClass = "ml-2 text-[10px] font-bold px-3 py-1 rounded-md transition-all uppercase active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ";
     const emeraldStyle = "bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white";
     const roseStyle = "bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white";
 
     if (isLoggedIn) {
-        btn.innerText = 'Đăng xuất';
-        btn.className = baseClass + roseStyle;
-        btn.dataset.state = "logged-in";
         window._isLoggedIn = true;
+        const activeMst = loggedInMst || window._loggedInMst || window._selectedCompanyMst;
+        if (activeMst) {
+            window._loggedInMst = activeMst;
+            window._selectedCompanyMst = activeMst;
+        }
+
+        if (selectCompany) {
+            if (window._loggedInMst) {
+                selectCompany.value = window._loggedInMst;
+            }
+            selectCompany.disabled = true;
+            selectCompany.title = "Đang trong phiên làm việc. Vui lòng đăng xuất trước khi chuyển sang công ty khác.";
+        }
+
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = "";
+            btn.style.cursor = "";
+            btn.innerText = 'Đăng xuất';
+            btn.className = baseClass + roseStyle;
+            btn.dataset.state = "logged-in";
+        }
     } else {
-        btn.innerText = 'Đăng nhập';
-        btn.className = baseClass + emeraldStyle;
-        btn.dataset.state = "logged-out";
         window._isLoggedIn = false;
+        window._loggedInMst = null;
 
-        // Xóa trắng dữ liệu hóa đơn khi đăng xuất
-        const tbody = document.getElementById('crawler-results-body');
-        if (tbody) tbody.innerHTML = '';
+        if (selectCompany) {
+            selectCompany.disabled = false;
+            selectCompany.title = "";
+        }
 
-        const paginationInfo = document.getElementById('crawler-pagination-info');
-        if (paginationInfo) paginationInfo.innerHTML = '';
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = "";
+            btn.style.cursor = "";
+            btn.innerText = 'Đăng nhập';
+            btn.className = baseClass + emeraldStyle;
+            btn.dataset.state = "logged-out";
+        }
 
-        const pagination = document.getElementById('crawler-pagination');
-        if (pagination) pagination.innerHTML = '';
-
-        // Reset status bar nếu có
-        const statusEl = document.getElementById('cpd-status');
-        if (statusEl) statusEl.textContent = '';
-
-        const countEl = document.getElementById('cpd-count');
-        if (countEl) countEl.textContent = '0';
+        // Xóa trắng dữ liệu hóa đơn trong RAM khi đăng xuất
+        if (typeof window.clearInvoiceRAM === 'function') {
+            window.clearInvoiceRAM("Đăng xuất tài khoản");
+        }
     }
 };
 
@@ -327,8 +587,22 @@ window.handleAuthAction = function (btn) {
     handleLoginClick(btn); // Gửi sang C#
 };
 window.handleLogoutClick = function () {
-    if (confirm("Bạn có chắc chắn muốn đăng xuất tài khoản thuế này không?")) {
+    if (typeof window.showConfirm !== 'function') {
+        if (!confirm("Bạn có chắc chắn muốn đăng xuất tài khoản thuế này không?")) return;
+        proceedLogout();
+        return;
+    }
 
+    window.showConfirm({
+        title: "Đăng xuất tài khoản thuế?",
+        message: "Phiên làm việc hiện tại sẽ kết thúc. Bạn có chắc chắn muốn đăng xuất khỏi trang thuế không?",
+        confirmText: "ĐĂNG XUẤT",
+        cancelText: "HỦY",
+        type: "logout",
+        onConfirm: proceedLogout
+    });
+
+    function proceedLogout() {
         // Disable nút + hiển thị loading
         const btn = document.getElementById('btn-auth');
         if (btn) {
@@ -358,84 +632,381 @@ window.handleLogoutClick = function () {
     }
 };
 
-// --- XỬ LÝ CHỌN NGÀY CHO ACCONLINE ---
+// --- ĐIỀU KHIỂN CHIỀU & HÌNH THỨC HÓA ĐƠN ---
+window._currentInvoiceType = 'ban_ra'; // 'ban_ra' | 'mua_vao'
+window._currentInvoiceCategory = 'dien_tu'; // 'dien_tu' | 'may_tinh_tien'
 
-document.addEventListener('DOMContentLoaded', function () {
+window.setInvoiceType = function (type) {
+    window._currentInvoiceType = type;
+    const btnBanRa = document.getElementById('tab-invoice-ban-ra');
+    const btnMuaVao = document.getElementById('tab-invoice-mua-vao');
+    if (type === 'ban_ra') {
+        btnBanRa?.classList.add('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnBanRa?.classList.remove('text-slate-500');
+        btnMuaVao?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnMuaVao?.classList.add('text-slate-500');
+    } else {
+        btnMuaVao?.classList.add('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnMuaVao?.classList.remove('text-slate-500');
+        btnBanRa?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnBanRa?.classList.add('text-slate-500');
+    }
+    window.updateFilterBadge();
+};
+
+window.setInvoiceCategory = function (cat) {
+    window._currentInvoiceCategory = cat;
+    const btnDienTu = document.getElementById('tab-cat-dien-tu');
+    const btnMayTinhTien = document.getElementById('tab-cat-may-tinh-tien');
+    if (cat === 'dien_tu') {
+        btnDienTu?.classList.add('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnDienTu?.classList.remove('text-slate-500');
+        btnMayTinhTien?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnMayTinhTien?.classList.add('text-slate-500');
+    } else {
+        btnMayTinhTien?.classList.add('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnMayTinhTien?.classList.remove('text-slate-500');
+        btnDienTu?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
+        btnDienTu?.classList.add('text-slate-500');
+    }
+    window.updateFilterBadge();
+};
+
+window.updateFilterBadge = function () {
+    const dirBadge = document.getElementById('badge-dir-text');
+    const catBadge = document.getElementById('badge-cat-text');
+    if (dirBadge) {
+        dirBadge.innerText = window._currentInvoiceType === 'mua_vao' ? '📥 Mua vào' : '📤 Bán ra';
+    }
+    if (catBadge) {
+        catBadge.innerText = window._currentInvoiceCategory === 'may_tinh_tien' ? '🖩 Máy tính tiền' : '⚡ HĐĐT';
+    }
+};
+
+// --- ĐIỀU KHIỂN SEARCH FILTER DIALOG MODAL ---
+
+window.openSearchDialog = function () {
+    const modal = document.getElementById('search-filter-modal');
+    if (!modal) return;
+
+    // Cập nhật tên công ty đang chọn
+    const compSelect = document.getElementById('select-company');
+    const compNameEl = document.getElementById('search-modal-company-name');
+    if (compNameEl && compSelect) {
+        compNameEl.innerText = compSelect.options[compSelect.selectedIndex]?.text || compSelect.value || 'Chưa chọn công ty';
+    }
+
+    modal.classList.remove('hidden');
+};
+
+window.closeSearchDialog = function () {
+    const modal = document.getElementById('search-filter-modal');
+    if (modal) modal.classList.add('hidden');
+};
+
+window.handleSearchFromDialog = function () {
+    window.closeSearchDialog();
+    window.handleSearchClick();
+};
+
+window.updateFilterSummaryBadge = function () {
+    const summaryText = document.getElementById('filter-summary-text');
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
+    const periodEl = document.getElementById('select-period');
+    if (!summaryText) return;
+
+    const periodLabel = periodEl?.options[periodEl.selectedIndex]?.text || '';
+    const fromVal = fromEl?.value || '';
+    const toVal = toEl?.value || '';
+
+    const formatShort = (v) => {
+        if (!v) return '';
+        const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[3]}/${m[2]}` : v;
+    };
+
+    if (periodLabel && fromVal && toVal) {
+        summaryText.innerText = `${periodLabel}: ${formatShort(fromVal)} → ${formatShort(toVal)}`;
+    } else if (fromVal && toVal) {
+        summaryText.innerText = `${formatShort(fromVal)} → ${formatShort(toVal)}`;
+    } else {
+        summaryText.innerText = 'Chưa chọn kỳ';
+    }
+};
+
+// --- XỬ LÝ KỲ THEO QUÝ VÀ CHỌN NGÀY ---
+
+window.initPeriodAndDatePicker = function (forceReset = false) {
+    const selectPeriod = document.getElementById('select-period');
     const dateFrom = document.getElementById('date-from');
     const dateTo = document.getElementById('date-to');
 
-    // 1. Tự động đặt ngày max là hôm nay khi vừa mở App
-    const today = new Date().toISOString().split('T')[0];
-    dateFrom.max = today;
-    dateTo.max = today;
+    if (!selectPeriod || !dateFrom || !dateTo) return;
 
-    function handleDateValidation(e) {
-        const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    // Khôi phục giá trị đã chọn nếu người dùng switch tab
+    if (!forceReset && window._savedPeriodState) {
+        selectPeriod.innerHTML = window._savedPeriodState.optionsHtml;
+        selectPeriod.value = window._savedPeriodState.selectedPeriod;
+        dateFrom.value = window._savedPeriodState.dateFrom;
+        dateTo.value = window._savedPeriodState.dateTo;
+        window.updateFilterSummaryBadge();
+        return;
+    }
 
-        // Use the date inputs' values directly and create Date objects
-        const start = new Date(dateFrom.value);
-        const end = new Date(dateTo.value);
+    if (!forceReset && dateFrom.value && dateTo.value && selectPeriod.options.length > 5) {
+        window.updateFilterSummaryBadge();
+        return;
+    }
 
-        if (!dateFrom.value || !dateTo.value) return;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const prevYear = currentYear - 1;
+    const currentMonth = now.getMonth(); // 0 - 11
 
-        // Use UTC midnight to avoid timezone/DST issues
-        const utcStart = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
-        const utcEnd = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+    // Xác định quý hiện tại
+    let currentQ = 1;
+    if (currentMonth >= 0 && currentMonth <= 2) currentQ = 1;
+    else if (currentMonth >= 3 && currentMonth <= 5) currentQ = 2;
+    else if (currentMonth >= 6 && currentMonth <= 8) currentQ = 3;
+    else currentQ = 4;
 
-        const diffDays = Math.floor((utcEnd - utcStart) / MS_PER_DAY); // 0 when same day
-        const diffDaysInclusive = diffDays + 1; // count including both endpoints
+    // Thiết lập danh sách options kỳ theo Tháng và Quý
+    selectPeriod.innerHTML = `
+        <optgroup label="Năm ${currentYear}">
+            <option value="this-month">Tháng này</option>
+            <option value="last-month">Tháng trước</option>
+            <option value="q1-${currentYear}">Quý 1 (${currentYear})</option>
+            <option value="q2-${currentYear}">Quý 2 (${currentYear})</option>
+            <option value="q3-${currentYear}">Quý 3 (${currentYear})</option>
+            <option value="q4-${currentYear}">Quý 4 (${currentYear})</option>
+        </optgroup>
+        <optgroup label="Năm ${prevYear}">
+            <option value="q1-${prevYear}">Quý 1 (${prevYear})</option>
+            <option value="q2-${prevYear}">Quý 2 (${prevYear})</option>
+            <option value="q3-${prevYear}">Quý 3 (${prevYear})</option>
+            <option value="q4-${prevYear}">Quý 4 (${prevYear})</option>
+        </optgroup>
+        <option value="custom">Tùy chọn...</option>
+    `;
 
-        // TRƯỜNG HỢP 1: Chọn ngày kết thúc nhỏ hơn ngày bắt đầu
-        if (diffDays < 0) {
-            window.showAlert('Lỗi logic', 'Ngày kết thúc không được nhỏ hơn ngày bắt đầu!', 'error');
-            if (e.target.id === 'date-from') {
-                dateTo.value = dateFrom.value;
-            } else {
-                dateFrom.value = dateTo.value;
-            }
-            return;
-        }
+    // Chọn Tháng này làm mặc định
+    const defaultVal = 'this-month';
+    selectPeriod.value = defaultVal;
+    window.handlePeriodChange(defaultVal);
+};
 
-        // TRƯỜNG HỢP 2: Khoảng cách vượt quá 31 ngày (1 month)
-        if (diffDaysInclusive > 31) {
-            window.showAlert('Giới hạn hệ thống', 'Hệ thống chỉ hỗ trợ tra cứu tối đa trong 1 tháng (31 ngày)!', 'error');
+window.handlePeriodChange = function (val) {
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
+    if (!fromEl || !toEl) return;
 
-            if (e.target.id === 'date-from') {
-                // Set "to" = from + 30 days (so inclusive range = 31 days)
-                const newEnd = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()) + (30 * MS_PER_DAY));
-                const finalEnd = newEnd > new Date() ? new Date() : newEnd;
-                dateTo.value = finalEnd.toISOString().split('T')[0];
-            } else {
-                // Set "from" = to - 30 days (so inclusive range = 31 days)
-                const newStart = new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) - (30 * MS_PER_DAY));
-                dateFrom.value = newStart.toISOString().split('T')[0];
-            }
+    if (val === 'custom') return;
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+
+    if (val === 'this-month') {
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        const lastDay = new Date(y, m + 1, 0).getDate();
+        fromEl.value = `${y}-${pad(m + 1)}-01`;
+        toEl.value = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+    } else if (val === 'last-month') {
+        const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+        const m = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+        const lastDay = new Date(y, m + 1, 0).getDate();
+        fromEl.value = `${y}-${pad(m + 1)}-01`;
+        toEl.value = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+    } else if (/^q[1-4]-\d{4}$/.test(val)) {
+        const mQ = val.match(/^q([1-4])-(\d{4})$/);
+        const q = parseInt(mQ[1], 10);
+        const y = mQ[2];
+        if (q === 1) {
+            fromEl.value = `${y}-01-01`;
+            toEl.value = `${y}-03-31`;
+        } else if (q === 2) {
+            fromEl.value = `${y}-04-01`;
+            toEl.value = `${y}-06-30`;
+        } else if (q === 3) {
+            fromEl.value = `${y}-07-01`;
+            toEl.value = `${y}-09-30`;
+        } else if (q === 4) {
+            fromEl.value = `${y}-10-01`;
+            toEl.value = `${y}-12-31`;
         }
     }
 
-    // Gán sự kiện thay đổi cho cả 2 ô
-    dateFrom.addEventListener('change', handleDateValidation);
-    dateTo.addEventListener('change', handleDateValidation);
+    window._savePeriodState();
+    if (typeof window.updateFilterSummaryBadge === 'function') {
+        window.updateFilterSummaryBadge();
+    }
+};
 
-    // Attach export button handlers
-    // NOTE: btn-export-xml dùng onclick trực tiếp trong HTML vì component được inject động
-    // (DOMContentLoaded chạy trước khi crawler_table.html được fetch và inject vào DOM)
+window.handleDateInputChange = function () {
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
+    const periodSelect = document.getElementById('select-period');
+    if (!fromEl || !toEl) return;
+
+    const fromVal = fromEl.value;
+    const toVal = toEl.value;
+    if (!fromVal || !toVal) return;
+
+    if (fromVal > toVal) {
+        window.showAlert('Lỗi logic', 'Ngày kết thúc không được nhỏ hơn ngày bắt đầu!', 'error');
+        toEl.value = fromVal;
+        return;
+    }
+
+    // Check if this date range matches any option in select-period
+    if (periodSelect) {
+        let matched = false;
+        for (let opt of periodSelect.options) {
+            if (opt.value === 'custom') continue;
+            const val = opt.value;
+            let expectedFrom = '';
+            let expectedTo = '';
+            const mQ = val.match(/^q([1-4])-(\d{4})$/);
+            if (mQ) {
+                const q = parseInt(mQ[1], 10);
+                const y = mQ[2];
+                if (q === 1) { expectedFrom = `${y}-01-01`; expectedTo = `${y}-03-31`; }
+                else if (q === 2) { expectedFrom = `${y}-04-01`; expectedTo = `${y}-06-30`; }
+                else if (q === 3) { expectedFrom = `${y}-07-01`; expectedTo = `${y}-09-30`; }
+                else if (q === 4) { expectedFrom = `${y}-10-01`; expectedTo = `${y}-12-31`; }
+            }
+            if (expectedFrom && expectedFrom === fromVal && expectedTo === toVal) {
+                periodSelect.value = val;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            periodSelect.value = 'custom';
+        }
+    }
+
+    window._savePeriodState();
+    if (typeof window.updateFilterSummaryBadge === 'function') {
+        window.updateFilterSummaryBadge();
+    }
+};
+
+window._savePeriodState = function () {
+    const selectPeriod = document.getElementById('select-period');
+    const dateFrom = document.getElementById('date-from');
+    const dateTo = document.getElementById('date-to');
+    if (selectPeriod && dateFrom && dateTo) {
+        window._savedPeriodState = {
+            optionsHtml: selectPeriod.innerHTML,
+            selectedPeriod: selectPeriod.value,
+            dateFrom: dateFrom.value,
+            dateTo: dateTo.value
+        };
+    }
+};
+
+// --- EXCEL DROPDOWN MENU ---
+window.toggleExcelDropdown = function () {
+    const menu = document.getElementById('excel-dropdown-menu');
+    if (!menu) return;
+    menu.classList.toggle('hidden');
+};
+
+window.closeExcelDropdown = function () {
+    const menu = document.getElementById('excel-dropdown-menu');
+    if (menu) menu.classList.add('hidden');
+};
+
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof window.initPeriodAndDatePicker === 'function') {
+        window.initPeriodAndDatePicker();
+    }
+    if (typeof window.updateFilterSummaryBadge === 'function') {
+        window.updateFilterSummaryBadge();
+    }
     const btnPdf = document.getElementById('btn-export-pdf');
-    // btn-export-pdf chưa có handler hoàn chỉnh, giữ nguyên
     if (btnPdf) btnPdf.addEventListener('click', () => window.handleExportRequest('pdf'));
+
+    // Click bên ngoài dropdown → tự đóng
+    document.addEventListener('click', function (e) {
+        const wrapper = document.getElementById('excel-dropdown-wrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
+            window.closeExcelDropdown();
+        }
+    });
 });
 
-// Hàm để C# bốc dữ liệu gửi sang Go
+// Hàm để C# bốc dữ liệu gửi sang Go (chuẩn hóa dạng DD/MM/YYYY)
 window.getFilterParams = function () {
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
+
+    const formatToDdMmYyyy = (val) => {
+        if (!val) return '';
+        val = val.trim();
+        const mIso = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (mIso) return `${mIso[3]}/${mIso[2]}/${mIso[1]}`;
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(val)) return val;
+        return val;
+    };
+
     return {
-        fromDate: document.getElementById('date-from').value,
-        toDate: document.getElementById('date-to').value
+        fromDate: formatToDdMmYyyy(fromEl ? fromEl.value : ''),
+        toDate: formatToDdMmYyyy(toEl ? toEl.value : ''),
+        rawFrom: fromEl ? fromEl.value : '',
+        rawTo: toEl ? toEl.value : '',
+        invoiceType: window._currentInvoiceType || 'ban_ra',
+        invoiceCategory: window._currentInvoiceCategory || 'dien_tu'
     };
 };
+// Hàm chuẩn hóa và bảo đảm tính chính xác của dữ liệu hóa đơn (tự sửa lỗi nếu cột tiền bị gán nhầm trạng thái)
+window.sanitizeInvoiceData = function (inv) {
+    if (!inv) return;
+    const isStatusString = (v) => {
+        if (!v || v === '---') return false;
+        const s = String(v).trim().toLowerCase();
+        return s.includes('hóa đơn') || s.includes('mới') || s.includes('thay thế') || s.includes('điều chỉnh') || s.includes('hủy') || !/\d/.test(s);
+    };
+
+    // Nếu tong_thanh_toan bị lưu nhầm trạng thái (ví dụ "Hóa đơn mới")
+    if (isStatusString(inv.tong_thanh_toan)) {
+        const statusVal = inv.tong_thanh_toan;
+        // 1. Phục hồi trạng thái chuẩn nếu trường trạng thái đang thiếu hoặc chứa số
+        if (!inv.trang_thai || inv.trang_thai === '---' || /\d{3}/.test(inv.trang_thai)) {
+            inv.trang_thai = statusVal;
+        }
+
+        // 2. Tìm lại tiền thanh toán thực tế:
+        // TH1: tong_phi chứa số tiền (do lỗi gán nhầm cột 10 vào tong_phi trước đây)
+        if (inv.tong_phi && !isStatusString(inv.tong_phi) && /\d/.test(inv.tong_phi)) {
+            inv.tong_thanh_toan = inv.tong_phi;
+            inv.tong_phi = "0";
+        } else {
+            // TH2: Tính tổng từ chưa thuế + tiền thuế - chiết khấu
+            const parseNum = (v) => {
+                if (!v) return 0;
+                const clean = String(v).replace(/\./g, '').replace(/,/g, '.').replace(/[^\d.-]/g, '');
+                return parseFloat(clean) || 0;
+            };
+            const chuaThue = parseNum(inv.tong_chua_thue);
+            const tienThue = parseNum(inv.tong_tien_thue);
+            const chietKhau = parseNum(inv.chiet_khau);
+            const total = chuaThue + tienThue - chietKhau;
+            if (total > 0) {
+                inv.tong_thanh_toan = new Intl.NumberFormat('vi-VN').format(total);
+            }
+        }
+    }
+};
+
 // Open detail modal (ensure function exists before renderInvoices uses it)
 window.openDetailModal = function (inv) {
-
     if (!inv) return;
+    if (typeof window.sanitizeInvoiceData === 'function') {
+        window.sanitizeInvoiceData(inv);
+    }
     const id = 'invoiceDetailModal';
     const existing = document.getElementById(id);
     if (existing) existing.remove();
@@ -446,10 +1017,16 @@ window.openDetailModal = function (inv) {
     // Hàm giữ nguyên bản dữ liệu cào được
     const raw = (s) => (s && s !== "" && s !== "---") ? String(s).trim() : "---";
 
+    // Xác định đơn vị tiền tệ thực tế của hóa đơn (VND, USD, EUR...)
+    const curUnit = (typeof inv.don_vi_tien_te === 'string' && /^[A-Za-z]{2,5}$/.test(inv.don_vi_tien_te.trim()))
+        ? inv.don_vi_tien_te.trim().toUpperCase()
+        : "VND";
+
     // Hàm hỗ trợ định dạng hiển thị tiền tệ và đơn vị
-    const fmt = (val, unit = "VND") => {
-        if (!val || val === "---") return "0 " + unit;
-        return val + " " + unit;
+    const fmt = (val, unit = curUnit) => {
+        const safeUnit = (typeof unit === 'string' && /^[A-Za-z]{2,5}$/.test(unit.trim())) ? unit.trim().toUpperCase() : curUnit;
+        if (!val || val === "---") return "0 " + safeUnit;
+        return val + " " + safeUnit;
     };
 
     const data = {
@@ -540,7 +1117,7 @@ window.openDetailModal = function (inv) {
                     <thead>
                         <tr class="border-y-2 border-black font-bold uppercase text-[11px]">
                             <th class="p-4 text-left">Diễn giải dịch vụ / hàng hóa</th>
-                            <th class="p-4 text-right w-56">Thành tiền (VND)</th>
+                            <th class="p-4 text-right w-56">Thành tiền (${curUnit})</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-zinc-300">
@@ -594,25 +1171,78 @@ window.handleSearchClick = function () {
         searchBtn.style.cursor = 'not-allowed';
         searchBtn.innerHTML = '⏳ Đang tìm...';
     }
+    const openSearchBtn = document.getElementById('btn-open-search');
+    if (openSearchBtn) {
+        openSearchBtn.disabled = true;
+        openSearchBtn.style.opacity = '0.6';
+        openSearchBtn.style.cursor = 'not-allowed';
+        openSearchBtn.innerHTML = '<span>⏳</span><span>Đang tìm...</span>';
+    }
 
-    // Xóa sạch kết quả cũ trước khi search mới
-    const tableBody = document.getElementById('crawler-results-body');
-    if (tableBody) tableBody.innerHTML = '';
-    const paginationEl = document.getElementById('pagination-container');
-    if (paginationEl) paginationEl.innerHTML = '';
+    // Xóa sạch kết quả cũ trong RAM trước khi search mới
+    if (typeof window.clearInvoiceRAM === 'function') {
+        window.clearInvoiceRAM("Bắt đầu tìm kiếm đợt mới");
+    }
 
-    // Reset bộ đếm hóa đơn về 0
+    // Reset toàn bộ modal tiến trình về trạng thái ban đầu để không hiển thị kết quả cũ
+    const modal = document.getElementById('crawl-progress-modal');
     const cpdCount = document.getElementById('cpd-count');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdDone = document.getElementById('cpd-icon-done');
+    const cpdError = document.getElementById('cpd-icon-error');
+    const cpdFolderWrap = document.getElementById('cpd-folder-wrap');
+    const cpdCancelWrap = document.getElementById('cpd-cancel-wrap');
+    const cancelBtn = document.getElementById('btn-cancel-crawl-modal');
+
     if (cpdCount) cpdCount.innerText = '0';
+    if (cpdSub) cpdSub.innerText = '';
+    if (cpdStatus) {
+        cpdStatus.innerText = 'Đang chuẩn bị tìm kiếm...';
+        cpdStatus.style.color = '#1e293b';
+    }
+    if (cpdTitle) {
+        cpdTitle.innerText = 'Đang tìm kiếm hóa đơn...';
+        cpdTitle.style.color = '#0f172a';
+    }
+    if (cpdSubtitle) cpdSubtitle.innerText = 'Vui lòng không đóng cửa sổ';
+    if (cpdSpinner) cpdSpinner.style.display = 'block';
+    if (cpdDone) cpdDone.style.display = 'none';
+    if (cpdError) cpdError.style.display = 'none';
+    if (cpdFolderWrap) cpdFolderWrap.style.display = 'none';
+    if (cpdCancelWrap) cpdCancelWrap.style.display = 'flex';
+    if (cancelBtn) {
+        cancelBtn.disabled = false;
+        cancelBtn.innerHTML = `
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+            <span>Hủy tiến trình</span>
+        `;
+    }
+    if (modal) {
+        modal.style.transition = '';
+        modal.style.opacity = '1';
+        modal.style.display = 'flex';
+    }
+
     const paginationInfo = document.getElementById('crawler-pagination-info');
     if (paginationInfo) paginationInfo.innerText = '';
+
+    if (typeof window.updateExportXmlButtonState === 'function') {
+        window.updateExportXmlButtonState(false);
+    }
 
     // 1. Lấy dữ liệu từ hàm bạn đã viết
     const params = window.getFilterParams();
 
     // 2. Kiểm tra nhanh (Double check lần cuối cho an toàn)
     if (!params.fromDate || !params.toDate) {
-        if (searchBtn) { searchBtn.disabled = false; searchBtn.style.opacity = '1'; searchBtn.style.cursor = 'pointer'; searchBtn.innerHTML = '🔍 Tìm kiếm'; }
+        if (searchBtn) { searchBtn.disabled = false; searchBtn.style.opacity = '1'; searchBtn.style.cursor = 'pointer'; searchBtn.innerHTML = '<span>🔍</span><span>Bắt đầu tìm kiếm</span>'; }
+        if (openSearchBtn) { openSearchBtn.disabled = false; openSearchBtn.style.opacity = '1'; openSearchBtn.style.cursor = 'pointer'; openSearchBtn.innerHTML = '<span>🔍</span><span>Bộ lọc tra cứu</span>'; }
         return window.showAlert('Thông báo', 'Vui lòng chọn đầy đủ khoảng thời gian!', 'error');
     }
 
@@ -649,9 +1279,9 @@ window.handleSearchClick = function () {
         if (window.finalizeSearchUI) window.finalizeSearchUI();
         return window.showAlert('Lỗi logic', 'Ngày kết thúc không được nhỏ hơn ngày bắt đầu!', 'error');
     }
-    if (diffDays + 1 > 31) {
+    if (diffDays > 93) {
         if (window.finalizeSearchUI) window.finalizeSearchUI();
-        return window.showAlert('Giới hạn', 'Khoảng thời gian không được quá 31 ngày!', 'info');
+        return window.showAlert('Giới hạn tra cứu', 'Hệ thống chỉ hỗ trợ tra cứu tối đa 1 Quý (không quá 93 ngày) để tránh quá tải dữ liệu!', 'warning');
     }
 
     // 3. Gửi sang C# (WinForms) để báo cho Backend Go bắt đầu Crawl
@@ -660,19 +1290,21 @@ window.handleSearchClick = function () {
             action: "SEARCH_INVOICE",
             data: {
                 fromDate: params.fromDate,
-                toDate: params.toDate
+                toDate: params.toDate,
+                invoiceType: params.invoiceType,
+                invoiceCategory: params.invoiceCategory
             }
         });
 
         // Có thể thêm hiệu ứng đổi text nút hoặc loading ở đây nếu muốn
         console.log("AccOnline: Đã gửi yêu cầu tra cứu từ " + params.fromDate + " đến " + params.toDate);
 
-        // Watchdog: tự động finalize UI sau 35s nếu không nhận được IsDone signal
+        // Watchdog: tự động finalize UI sau 180s nếu hoàn toàn không có phản hồi
         if (window._searchWatchdogId) {
             clearTimeout(window._searchWatchdogId);
             window._searchWatchdogId = null;
         }
-        const wd = window._searchWatchdogDuration || 35000;
+        const wd = window._searchWatchdogDuration || 180000;
         window._searchWatchdogId = setTimeout(() => {
             console.warn('Search watchdog triggered — finalizing UI');
             if (window.finalizeSearchUI) window.finalizeSearchUI();
@@ -747,16 +1379,29 @@ window.handleExportRequest = function (type) {
 };
 function renderInvoices(invoices) {
     const tableBody = document.getElementById('crawler-results-body');
+    if (!tableBody) return;
     tableBody.innerHTML = '';
 
     if (!invoices || invoices.length === 0) {
         tableBody.innerHTML = `<tr><td colspan="7" class="py-20 text-center text-slate-300 italic">Chưa có dữ liệu để hiển thị</td></tr>`;
+        if (!window._invoiceCache || window._invoiceCache.length === 0) {
+            if (typeof window.updateExportXmlButtonState === 'function') {
+                window.updateExportXmlButtonState(false);
+            }
+        }
         return;
+    }
+
+    if (typeof window.updateExportXmlButtonState === 'function') {
+        window.updateExportXmlButtonState(true);
     }
 
     const fragment = document.createDocumentFragment();
 
     invoices.forEach((inv) => {
+        if (typeof window.sanitizeInvoiceData === 'function') {
+            window.sanitizeInvoiceData(inv);
+        }
         const row = document.createElement('tr');
         row.className = "hover:bg-blue-50/40 transition-all cursor-pointer group";
 
@@ -785,9 +1430,9 @@ function renderInvoices(invoices) {
             <td class="py-4 px-4 text-right">
                 <div class="flex flex-col gap-0.5">
                     <!-- Tổng tiền: text-base font-bold -->
-                    <span class="text-base font-bold text-slate-900">${inv.tong_thanh_toan}</span>
+                    <span class="text-base font-bold text-slate-900">${inv.tong_thanh_toan} <span class="text-xs font-semibold text-slate-500">${inv.don_vi_tien_te || 'VND'}</span></span>
                     <!-- Tiền thuế: text-xs -->
-                    <span class="text-xs text-slate-500 font-medium">Thuế: ${inv.tong_tien_thue} ${inv.don_vi_tien_te}</span>
+                    <span class="text-xs text-slate-500 font-medium">Thuế: ${inv.tong_tien_thue} ${inv.don_vi_tien_te || 'VND'}</span>
                 </div>
             </td>
 
@@ -847,6 +1492,7 @@ function renderInvoices(invoices) {
 
     tableBody.appendChild(fragment);
 }
+window.renderInvoices = renderInvoices;
 
 // NOTE: renderInvoices only renders the rows given. Pagination is handled separately
 
@@ -857,8 +1503,15 @@ window._pageSize = 20;
 // Store invoices for client-side paging and show first page
 window.paginateClient = function (invoices, pageSize = 20) {
     if (!Array.isArray(invoices)) return;
-    window._invoiceCache = invoices;
+    if (typeof window.setInvoiceRAM === 'function') {
+        window.setInvoiceRAM(invoices);
+    } else {
+        window._invoiceCache = invoices;
+    }
     window._pageSize = pageSize || 20;
+    if (typeof window.updateExportXmlButtonState === 'function') {
+        window.updateExportXmlButtonState(invoices.length > 0);
+    }
     window.showPage(1);
 };
 
@@ -1018,21 +1671,23 @@ window.updateCrawlerStatus = function (data) {
         cpdStatus.style.color = isError ? '#dc2626' : '#1e293b';
     }
     if (cpdSub) {
-        // Chỉ cập nhật khi có total thực sự hoặc khi search kết thúc (isDone)
+        // Cập nhật khi có total thực sự hoặc khi search kết thúc (isDone)
         if (total > 0) {
             cpdSub.innerText = `Tìm thấy tổng cộng ${total} hóa đơn`;
         } else if (isDone) {
             cpdSub.innerText = 'Không tìm thấy hóa đơn nào';
+        } else {
+            cpdSub.innerText = data.sub || data.sub_detail || data.SubDetail || '';
         }
-        // Nếu total = 0 VÀ chưa done → giữ nguyên text cũ (không ghi đè)
     }
     if (cpdCount) {
-        if (total > 0) cpdCount.innerText = total;
-        else if (isDone) cpdCount.innerText = 0;
+        cpdCount.innerText = total > 0 ? total : 0;
     }
     if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';
     if (cpdDone) cpdDone.style.display = isDone ? 'flex' : 'none';
     if (cpdError) cpdError.style.display = isError ? 'flex' : 'none';
+    const cancelWrap = document.getElementById('cpd-cancel-wrap');
+    if (cancelWrap) cancelWrap.style.display = (isDone || isError) ? 'none' : 'flex';
 
     // Tự ẩn sau khi xong
     if (isDone || isError) {
@@ -1077,6 +1732,8 @@ async function handleExportXml(btn) {
         if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';
         if (cpdDone) cpdDone.style.display = isDone ? 'flex' : 'none';
         if (cpdError) cpdError.style.display = isError ? 'flex' : 'none';
+        const cpdCancel = document.getElementById('cpd-cancel-wrap');
+        if (cpdCancel) cpdCancel.style.display = (isDone || isError) ? 'none' : 'flex';
         if (cpdTitle) {
             cpdTitle.innerText = isError ? 'Có lỗi xảy ra' : isDone ? 'Tải hoàn tất! 🎉' : 'Đang tải hóa đơn...';
             cpdTitle.style.color = isError ? '#dc2626' : isDone ? '#059669' : '#0f172a';
@@ -1116,6 +1773,14 @@ async function handleExportXml(btn) {
     }
 
     // --- END HELPER ---
+
+    // 0. Kiểm tra dữ liệu hóa đơn: chỉ cho phép xuất khi có dữ liệu
+    const hasData = Array.isArray(window._invoiceCache) && window._invoiceCache.length > 0;
+    if (!hasData) {
+        btn.disabled = true;
+        window.showAlert?.('Thông báo', 'Chưa có dữ liệu hóa đơn để xuất! Vui lòng tìm kiếm dữ liệu trước.', 'warning');
+        return;
+    }
 
     // 1. Kiểm tra môi trường WebView2
     if (!(window.chrome?.webview)) {
@@ -1245,7 +1910,8 @@ async function handleExportXml(btn) {
         setTimeout(hideProgress, 6000);
         window.showAlert?.('Lỗi xuất XML', errMsg, 'error');
     } finally {
-        btn.disabled = false;
+        const stillHasData = Array.isArray(window._invoiceCache) && window._invoiceCache.length > 0;
+        btn.disabled = !stillHasData;
         btn.innerHTML = originalContent;
     }
 }

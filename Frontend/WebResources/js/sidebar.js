@@ -1,11 +1,24 @@
 // 1. Mở Modal
 window.openLogoutModal = function () {
+    if (typeof window.showConfirm === 'function') {
+        window.showConfirm({
+            title: 'Xác nhận thoát',
+            message: 'Bạn có chắc muốn thoát? Tất cả chương trình đang chạy sẽ bị đóng.',
+            confirmText: 'THOÁT NGAY',
+            cancelText: 'HỦY',
+            type: 'logout',
+            onConfirm: function () {
+                window.confirmLogout();
+            }
+        });
+        return;
+    }
     const modal = document.getElementById('logoutModal');
     if (modal) {
         modal.classList.remove('hidden');
         modal.classList.add('flex');
     }
-}
+};
 
 
 // 2. Đóng Modal
@@ -55,17 +68,36 @@ window.loadPage = async function (pagePath, element) {
             }
         }
 
-        // Khôi phục trạng thái đăng nhập khi chuyển tab
-        if (pagePath.includes('crawler_table.html') && window._isLoggedIn) {
+        // Khôi phục trạng thái đăng nhập và dữ liệu khi chuyển về tab crawler_table.html
+        if (pagePath.includes('crawler_table.html')) {
             setTimeout(() => {
-                if (typeof window.updateLoginStatus === 'function') {
-                    window.updateLoginStatus(true);
+                if (typeof window.renderCompanyDropdown === 'function') {
+                    window.renderCompanyDropdown();
+                }
+                if (window._isLoggedIn && typeof window.updateLoginStatus === 'function') {
+                    window.updateLoginStatus(true, window._loggedInMst);
+                }
+                // Khôi phục danh sách hóa đơn nếu đã có sẵn dữ liệu trước đó
+                const hasInvoices = window._invoiceCache && window._invoiceCache.length > 0;
+                if (hasInvoices && typeof window.showPage === 'function') {
+                    window.showPage(1);
+                }
+                if (typeof window.updateExportXmlButtonState === 'function') {
+                    window.updateExportXmlButtonState(hasInvoices);
+                }
+                // Khởi tạo/khôi phục bộ chọn Kỳ và Ngày
+                if (typeof window.initPeriodAndDatePicker === 'function') {
+                    window.initPeriodAndDatePicker();
+                }
+                if (typeof window.updateFilterSummaryBadge === 'function') {
+                    window.updateFilterSummaryBadge();
                 }
             }, 100);
         }
         // ------------------------------
 
         if (element) {
+
             document.querySelectorAll('.nav-link').forEach(link => {
                 link.classList.remove('bg-emerald-600/20', 'text-emerald-300', 'border-emerald-500/20');
                 link.classList.add('text-slate-400');

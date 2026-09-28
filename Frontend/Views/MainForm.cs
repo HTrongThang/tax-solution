@@ -13,10 +13,13 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using Frontend.Models;
+using Frontend.Services;
 namespace Frontend.Views
 {
     public partial class MainForm : Form
     {
+        private readonly DatabaseService _databaseService = new DatabaseService();
+
         public MainForm()
         {
             InitializeComponent();
@@ -26,6 +29,9 @@ namespace Frontend.Views
         private async void login_Load(object sender, EventArgs e)
         {
             this.Opacity = 0;
+
+            // Khởi tạo SQLite DB (tự tạo bảng Users và TaxAccounts nếu chưa có)
+            await _databaseService.InitializeAsync();
 
             // 1. Khởi tạo WebView2 (lưu cache vào AppData để tránh lỗi quyền)
             var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
@@ -99,10 +105,10 @@ namespace Frontend.Views
 
                         // Kiểm tra mã băm mật khẩu
                         string hashedInput = ComputeHash(pass);
-                        string founderHash = "0e398941913d4b5479819dd6fc8e35c168cd00c4b5a11f602d5b09f02cd61448";
+                        string founderHash = "6fae104d9d8828ab82bf0842c2ba35465ebe7b6c4501beacde8735325b330035"; 
 
-                        bool isFounder = (user == "Founder" && hashedInput == founderHash);
-                        bool isValidUser = await ValidateUserFromJson(user, hashedInput);
+                        bool isFounder = (string.Equals(user, "Founder", StringComparison.OrdinalIgnoreCase) && hashedInput == founderHash);
+                        bool isValidUser = await _databaseService.ValidateUserAsync(user, hashedInput);
 
                         if (isFounder || isValidUser)
                         {
@@ -163,16 +169,37 @@ namespace Frontend.Views
                     // --- 2. XỬ LÝ ADMIN THÊM TÀI KHOẢN MỚI ---
                     else if (action == "ADMIN_THEM_USER")
                     {
-                        string u = root.GetProperty("username").GetString();
-                        string p = root.GetProperty("password").GetString();
+                        string u = root.GetProperty("username").GetString()?.Trim();
+                        string p = root.GetProperty("password").GetString()?.Trim();
+
+                        if (string.IsNullOrEmpty(u) || string.IsNullOrEmpty(p))
+                        {
+                            await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Lỗi', 'Thông tin tài khoản không được để trống!', 'warning')");
+                            return;
+                        }
+
+                        // Không cho phép đặt trùng tên với Quản trị viên tối cao (Founder)
+                        if (string.Equals(u, "Founder", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Lỗi', 'Tên đăng nhập này không được sử dụng!', 'error')");
+                            return;
+                        }
+
+                        // Kiểm tra trùng tên nhân viên trong SQLite
+                        if (await _databaseService.UserExistsAsync(u))
+                        {
+                            await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Lỗi', 'Tên đăng nhập này đã tồn tại trong hệ thống!', 'warning')");
+                            return;
+                        }
 
                         // Hash mật khẩu trước khi lưu trữ để bảo mật
                         string hashedPass = ComputeHash(p);
 
-                        // Thực thi lưu vào file JSON hệ thống
-                        await LuuUserVaoFileJson(u, hashedPass);
+                        // Thực thi lưu vào database SQLite
+                        await _databaseService.AddUserAsync(u, hashedPass, "Staff");
 
-                        await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Thành công', 'Đã thêm tài khoản mới vào hệ thống!', 'success')");
+                        string safeName = Newtonsoft.Json.JsonConvert.ToString(u);
+                        await webView21.CoreWebView2.ExecuteScriptAsync($"showAlert('Thành công', 'Đã cấp quyền cho tài khoản ' + {safeName}, 'success')");
                     }
                 }
             }
@@ -182,63 +209,6 @@ namespace Frontend.Views
                 Console.WriteLine("Lỗi tại WebMessageReceived: " + ex.Message);
                 MessageBox.Show("Hệ thống gặp sự cố khi xử lý dữ liệu: " + ex.Message, "Thông báo lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-        }
-        private async Task LuuUserVaoFileJson(string u, string p)
-        {
-            try
-            {
-                string appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution");
-                Directory.CreateDirectory(appDataDir);
-                string path = Path.Combine(appDataDir, "users.json");
-                List<dynamic> users = new List<dynamic>();
-
-                if (File.Exists(path))
-                {
-                    string oldData = await File.ReadAllTextAsync(path);
-                    users = JsonSerializer.Deserialize<List<dynamic>>(oldData) ?? new List<dynamic>();
-                }
-
-                // Thêm user mới
-                users.Add(new
-                {
-                    username = u,
-                    password = p,
-                    role = "Staff",
-                    created_at = DateTime.Now.ToString("dd/MM/yyyy HH:mm")
-                });
-
-                string jsonString = JsonSerializer.Serialize(users, new JsonSerializerOptions { WriteIndented = true });
-                await File.WriteAllTextAsync(path, jsonString);
-
-                // Bắn thông báo về giao diện Web
-                await webView21.CoreWebView2.ExecuteScriptAsync($"showAlert('Thành công', 'Đã cấp quyền cho {u}', 'success')");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Lỗi lưu user: " + ex.Message);
-            }
-        }
-        private async Task<bool> ValidateUserFromJson(string user, string pass)
-        {
-            string filePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "users.json");
-
-            // Nếu file chưa tồn tại (chưa có ai được tạo) thì trả về false luôn
-            if (!File.Exists(filePath)) return false;
-
-            string json = await File.ReadAllTextAsync(filePath);
-            using (JsonDocument doc = JsonDocument.Parse(json))
-            {
-                // Duyệt qua danh sách user trong file JSON
-                foreach (var item in doc.RootElement.EnumerateArray())
-                {
-                    if (item.GetProperty("username").GetString() == user &&
-                        item.GetProperty("password").GetString() == pass)
-                    {
-                        return true; // Khớp tài khoản!
-                    }
-                }
-            }
-            return false; // Không tìm thấy hoặc sai pass
         }
         // Hàm này để lưu thông tin khi người dùng tích vào checkbox
         private void LuuVaoSettings(string u, string p)
@@ -271,24 +241,13 @@ namespace Frontend.Views
             }
         }
         /// <summary>
-        /// Mã hóa mật khẩu bằng Windows DPAPI.
-        /// Chỉ user Windows hiện tại mới có thể giải mã — không cần lưu key/IV.
+        /// Mã hóa mật khẩu bằng Windows DPAPI thông qua SecurityHelper.
         /// </summary>
-        public static string ProtectPassword(string plainText)
-        {
-            byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
-            byte[] encryptedBytes = ProtectedData.Protect(plainBytes, null, DataProtectionScope.CurrentUser);
-            return Convert.ToBase64String(encryptedBytes);
-        }
+        public static string ProtectPassword(string plainText) => SecurityHelper.ProtectPassword(plainText);
 
         /// <summary>
-        /// Giải mã mật khẩu đã được bảo vệ bằng DPAPI.
+        /// Giải mã mật khẩu bằng DPAPI thông qua SecurityHelper.
         /// </summary>
-        public static string UnprotectPassword(string cipherText)
-        {
-            byte[] encryptedBytes = Convert.FromBase64String(cipherText);
-            byte[] plainBytes = ProtectedData.Unprotect(encryptedBytes, null, DataProtectionScope.CurrentUser);
-            return Encoding.UTF8.GetString(plainBytes);
-        }
+        public static string UnprotectPassword(string cipherText) => SecurityHelper.UnprotectPassword(cipherText);
     }
 }

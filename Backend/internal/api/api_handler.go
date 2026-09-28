@@ -34,6 +34,7 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 		taxRoutes.GET("/status", h.CheckCrawlStatus)
 		taxRoutes.POST("/logout", h.LogoutTax)
 		taxRoutes.POST("/shutdown", h.ShutdownTax)
+		taxRoutes.POST("/stop", h.StopTax)
 		taxRoutes.GET("/showLogin", h.ShowLoginDialog)
 	}
 }
@@ -118,6 +119,8 @@ func (h *Handler) LoginTax(c *gin.Context) {
 
 		if strings.Contains(errStr, "SAI_CAPTCHA") {
 			statusType = "error_captcha"
+		} else if strings.Contains(errStr, "SAI_THONG_TIN") {
+			statusType = "error_credentials"
 		}
 
 		c.JSON(http.StatusUnauthorized, models.Response{
@@ -136,6 +139,8 @@ func (h *Handler) LoginTax(c *gin.Context) {
 func (h *Handler) GetInvoices(c *gin.Context) {
 	fromDate := c.Query("from")
 	toDate := c.Query("to")
+	invoiceType := c.DefaultQuery("type", "ban_ra")
+	category := c.DefaultQuery("category", "dien_tu")
 
 	if fromDate == "" || toDate == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Thiếu ngày tháng"})
@@ -162,7 +167,7 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 	go func() {
 		defer close(streamChan)
 		// Gọi crawler (truyền ctx để hỗ trợ ngắt kết nối)
-		_, _ = h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, streamChan)
+		_, _ = h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, invoiceType, category, streamChan)
 	}()
 
 	// Đẩy dữ liệu về Client
@@ -245,6 +250,16 @@ func (h *Handler) CheckCrawlStatus(c *gin.Context) {
 		"total_invoices": h.Crawler.TotalInvoices,
 	})
 }
+
+// StopTax: Dừng tiến trình cào hoặc tìm kiếm
+func (h *Handler) StopTax(c *gin.Context) {
+	h.Crawler.Stop()
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "success",
+		"message": "Đã gửi lệnh dừng tiến trình.",
+	})
+}
+
 func (h *Handler) LogoutTax(c *gin.Context) {
 	// Soft logout: đăng xuất trang thuế nhưng GIỮ Chrome mở
 	err := h.Crawler.SoftLogout()

@@ -30,13 +30,46 @@ namespace Frontend
         {
             try
             {
+                // Nếu backend đã được bật sẵn ở chế độ Debug/Dev (VS Code, dlv), không khởi động TaxBot.exe nữa để tránh trùng port 8080
+                try
+                {
+                    using var pingClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMilliseconds(600) };
+                    var ping = pingClient.GetAsync("http://localhost:8080/api/tax/status").Result;
+                    if (ping.IsSuccessStatusCode)
+                    {
+                        Debug.WriteLine("✅ Backend đã đang chạy sẵn trên port 8080 (Dev mode).");
+                        return;
+                    }
+                }
+                catch { }
+
+                // 1. Quét và tắt sạch tiến trình TaxBot cũ còn sót lại để giải phóng port 8080
+                foreach (var p in Process.GetProcessesByName("TaxBot"))
+                {
+                    try
+                    {
+                        p.Kill();
+                        p.WaitForExit(1000);
+                    }
+                    catch { }
+                }
+
                 string appDir = AppDomain.CurrentDomain.BaseDirectory;
                 string backendPath = Path.Combine(appDir, "TaxBot.exe");
 
                 if (!File.Exists(backendPath))
                 {
-                    Debug.WriteLine($"TaxBot.exe không tìm thấy tại: {backendPath}");
-                    return;
+                    // Fallback tìm ở thư mục Backend khi chạy debug
+                    string devPath = Path.GetFullPath(Path.Combine(appDir, @"..\..\..\..\Backend\TaxBot.exe"));
+                    if (File.Exists(devPath))
+                    {
+                        backendPath = devPath;
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"TaxBot.exe không tìm thấy tại: {backendPath}");
+                        return;
+                    }
                 }
 
                 // Log file để debug khi TaxBot crash
