@@ -646,6 +646,116 @@ namespace Frontend.Views
                     }
                     break;
 
+                case "PARSE_XML_DIRECTORY":
+                    try
+                    {
+                        string xmlRequestId = packet?.requestId != null ? packet.requestId.ToString() : null;
+                        string directoryPath = packet?.data?.directoryPath != null ? packet.data.directoryPath.ToString() : null;
+
+                        // Nếu không truyền directoryPath, mở FolderBrowserDialog để người dùng chọn
+                        if (string.IsNullOrWhiteSpace(directoryPath))
+                        {
+                            this.Invoke(new Action(async () =>
+                            {
+                                using var fbd = new FolderBrowserDialog
+                                {
+                                    Description = "Chọn thư mục chứa các file XML Hóa đơn điện tử",
+                                    UseDescriptionForTitle = true,
+                                    ShowNewFolderButton = false
+                                };
+
+                                if (fbd.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                                {
+                                    await ExecuteParseXmlDirectoryAsync(fbd.SelectedPath, xmlRequestId);
+                                }
+                                else
+                                {
+                                    var cancelPayload = new
+                                    {
+                                        action = "PARSE_XML_CANCELLED",
+                                        message = "Người dùng đã hủy chọn thư mục.",
+                                        requestId = xmlRequestId
+                                    };
+                                    await PostWebMessageAsJson(cancelPayload);
+                                }
+                            }));
+                        }
+                        else
+                        {
+                            _ = ExecuteParseXmlDirectoryAsync(directoryPath, xmlRequestId);
+                        }
+                    }
+                    catch (Exception exOuter)
+                    {
+                        Debug.WriteLine("Lỗi PARSE_XML_DIRECTORY: " + exOuter.Message);
+                    }
+                    break;
+
+            }
+        }
+
+        /// <summary>
+        /// Quét và bóc tách dữ liệu hóa đơn từ các file XML trong thư mục được chỉ định
+        /// </summary>
+        private async Task ExecuteParseXmlDirectoryAsync(string directoryPath, string? requestId)
+        {
+            try
+            {
+                // Thông báo bắt đầu quét
+                await PostWebMessageAsJson(new
+                {
+                    action = "PARSE_XML_START",
+                    requestId = requestId,
+                    directoryPath = directoryPath,
+                    message = "Bắt đầu quét và đọc các file XML hóa đơn..."
+                });
+
+                // Lấy danh sách hóa đơn tóm tắt hiện có trong bộ nhớ RAM để ghép nối nếu có
+                var existingInvoices = InvoiceMemoryService.Instance.GetInvoices();
+
+                // Tạo đối tượng báo cáo tiến độ bóc tách
+                var progress = new Progress<(int current, int total, string currentFile)>(async p =>
+                {
+                    try
+                    {
+                        await PostWebMessageAsJson(new
+                        {
+                            action = "PARSE_XML_PROGRESS",
+                            requestId = requestId,
+                            current = p.current,
+                            total = p.total,
+                            currentFile = p.currentFile
+                        });
+                    }
+                    catch { }
+                });
+
+                // Chạy ngầm việc quét và bóc tách file XML
+                var result = await XmlInvoiceParserService.Instance.ParseDirectoryAsync(directoryPath, existingInvoices, progress);
+
+                // Trả kết quả hoàn tất về cho Frontend
+                await PostWebMessageAsJson(new
+                {
+                    action = "PARSE_XML_DONE",
+                    requestId = requestId,
+                    success = result.Success,
+                    message = result.Message,
+                    totalFound = result.TotalFilesFound,
+                    totalParsed = result.TotalFilesParsed,
+                    totalFailed = result.TotalFilesFailed,
+                    invoices = result.Invoices,
+                    errors = result.Errors
+                });
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[UserForm] Lỗi ExecuteParseXmlDirectoryAsync: " + ex.Message);
+                await PostWebMessageAsJson(new
+                {
+                    action = "PARSE_XML_ERROR",
+                    requestId = requestId,
+                    message = "Lỗi bóc tách XML: " + ex.Message
+                });
             }
         }
         private async Task SendSettingsDataToWeb()
