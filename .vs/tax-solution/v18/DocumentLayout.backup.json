@@ -37,7 +37,7 @@
               "Title": "Microsoft.Common.CurrentVersion.targets",
               "DocumentMoniker": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\MSBuild\\Current\\Bin\\amd64\\Microsoft.Common.CurrentVersion.targets",
               "ToolTip": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\MSBuild\\Current\\Bin\\amd64\\Microsoft.Common.CurrentVersion.targets",
-              "ViewState": "AgIAAIQJAAAAAAAAAAAgwJYJAABPAAAAAAAAAA==",
+              "ViewState": "AgIAAIQJAAAAAAAAAAAgwJcJAABMAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003801|",
               "WhenOpened": "2026-09-28T06:34:27.662Z",
               "EditorCaption": ""
@@ -50,10 +50,9 @@
               "RelativeDocumentMoniker": "Frontend\\Views\\UserForm.cs",
               "ToolTip": "D:\\tax-solution\\Frontend\\Views\\UserForm.cs",
               "RelativeToolTip": "Frontend\\Views\\UserForm.cs",
-              "ViewState": "AgIAAEgCAAAAAAAAAAAAAFUCAAA+AAAAAAAAAA==",
+              "ViewState": "AgIAAGICAAAAAAAAAAAAAG8CAAA+AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-09-24T07:01:33.549Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-09-24T07:01:33.549Z"
             },
             {
               "$type": "Document",

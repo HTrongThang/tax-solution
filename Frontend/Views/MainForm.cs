@@ -23,6 +23,7 @@ namespace Frontend.Views
         public MainForm()
         {
             InitializeComponent();
+            this.Text = $"TaxSolution - Đăng nhập ({AppVersionHelper.DisplayVersion})";
             this.Size = new Size(900, 600);
             this.StartPosition = FormStartPosition.CenterScreen;
         }
@@ -37,6 +38,9 @@ namespace Frontend.Views
             var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await webView21.EnsureCoreWebView2Async(env);
+            await webView21.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                $"window.appVersion = '{AppVersionHelper.DisplayVersion}'; localStorage.setItem('app_version', '{AppVersionHelper.DisplayVersion}');"
+            );
 
             // 2. Thiết lập Mapping thư mục ảo (Giải quyết triệt để lỗi Unsafe/Security)
             string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -48,10 +52,14 @@ namespace Frontend.Views
                 CoreWebView2HostResourceAccessKind.Allow
             );
 
-            // 3. Xử lý sau khi nạp trang xong (Ghi nhớ mật khẩu)
+            // 3. Xử lý sau khi nạp trang xong (Ghi nhớ mật khẩu & Phiên bản)
             webView21.NavigationCompleted += (s, args) =>
             {
                 this.Opacity = 1;
+
+                // Tự động đồng bộ số phiên bản vào giao diện HTML
+                string verScript = $"document.querySelectorAll('.app-version-text').forEach(el => el.innerText = '{AppVersionHelper.DisplayVersion}');";
+                webView21.CoreWebView2.ExecuteScriptAsync(verScript);
 
                 if (Properties.Settings.Default.RememberMe)
                 {
@@ -85,6 +93,20 @@ namespace Frontend.Views
             // 5. ĐIỀU QUAN TRỌNG: Điều hướng bằng Domain ảo thay vì file:///
             // Hệ thống sẽ tự hiểu gốc là thư mục WebResources
             webView21.CoreWebView2.Navigate("https://taxscraper.app/login.html");
+
+            // 6. Kiểm tra phiên bản mới ngầm trên mạng (không gây đơ UI)
+            _ = Task.Run(async () =>
+            {
+                var updateResult = await UpdateService.CheckForUpdateAsync();
+                if (updateResult.Success && updateResult.HasUpdate)
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        var dlg = new UpdateDialogForm(updateResult);
+                        dlg.ShowDialog(this);
+                    }));
+                }
+            });
         }
         private async void CoreWebView2_WebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {

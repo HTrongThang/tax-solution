@@ -246,3 +246,14 @@ window.showConfirm = function (optsOrTitle, message, onConfirmLegacy) {
         if (typeof onConfirm === 'function') onConfirm();
     };
 };
+
+/**
+ * Gửi yêu cầu tới C# để kiểm tra phiên bản mới
+ */
+window.checkAppUpdate = function (manual = true) {
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ action: "CHECK_APP_UPDATE", manual: manual });
+    } else {
+        console.warn("WebView2 bridge not ready");
+    }
+};

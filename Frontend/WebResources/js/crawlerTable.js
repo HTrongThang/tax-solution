@@ -12,6 +12,10 @@ window.updateExportXmlButtonState = function (hasData) {
     if (btnExcel) {
         btnExcel.disabled = !hasData;
     }
+    const btnDownloadDetail = document.getElementById('btn-download-detail');
+    if (btnDownloadDetail && !window._isDownloadingDetail) {
+        btnDownloadDetail.disabled = !hasData;
+    }
 };
 
 // ============================================================
@@ -205,6 +209,32 @@ if (window.chrome?.webview) {
             if (payload.action === "CRAWL_FINISHED") {
                 try { window.showAlert?.('Đã hoàn thành', 'Đã cào xong hóa đơn!', 'success'); } catch { }
                 if (window.finalizeSearchUI) window.finalizeSearchUI();
+                return;
+            }
+
+            // ========== DOWNLOAD DETAIL EVENTS ==========
+            if (payload.action === "DOWNLOAD_DETAIL_ACK") {
+                console.log('DOWNLOAD_DETAIL_ACK', payload);
+                return;
+            }
+
+            if (payload.action === "DOWNLOAD_PROGRESS") {
+                window._updateDownloadProgress(payload);
+                return;
+            }
+
+            if (payload.action === "DOWNLOAD_FINISHED") {
+                window._onDownloadFinished(payload);
+                return;
+            }
+
+            if (payload.action === "DOWNLOAD_STOPPED") {
+                window._onDownloadStopped(payload);
+                return;
+            }
+
+            if (payload.action === "DOWNLOAD_ERROR") {
+                window._onDownloadError(payload);
                 return;
             }
 
@@ -1828,6 +1858,8 @@ async function handleExportXml(btn) {
                     window.chrome.webview.postMessage({
                         action: 'START_CRAWL',
                         output_dir: out,
+                        mst: window._loggedInMst || window._selectedCompanyMst || '',
+                        invoice_type: window._currentInvoiceType || 'ban_ra',
                         requestId
                     });
                     return;
@@ -1914,4 +1946,203 @@ async function handleExportXml(btn) {
         btn.disabled = !stillHasData;
         btn.innerHTML = originalContent;
     }
+}
+
+// ============================================================
+// CHỨC NĂNG TẢI CHI TIẾT (DOWNLOAD DETAIL)
+// Dùng lại luồng START_CRAWL (backend CrawlAllPages) với UI nâng cao
+// ============================================================
+
+window._isDownloadingDetail = false;
+window._downloadTimerInterval = null;
+window._downloadTimerSeconds = 0;
+
+// Bấm nút [🗂️ Tải chi tiết]
+function handleDownloadDetail() {
+    // 1. Kiểm tra dữ liệu
+    const invoices = window._invoiceCache;
+    if (!Array.isArray(invoices) || invoices.length === 0) {
+        window.showAlert?.('Thông báo', 'Chưa có dữ liệu hóa đơn! Vui lòng bấm Tìm kiếm trước.', 'warning');
+        return;
+    }
+    if (!(window.chrome?.webview)) {
+        window.showAlert?.('Lỗi', 'WebView2 chưa sẵn sàng!', 'error');
+        return;
+    }
+    if (window._isDownloadingDetail) return;
+
+    // 2. Bật trạng thái
+    window._isDownloadingDetail = true;
+    const btnDetail = document.getElementById('btn-download-detail');
+    const btnSearch = document.getElementById('btn-open-search');
+    const btnStop = document.getElementById('btn-stop-download');
+    const timerEl = document.getElementById('download-timer');
+
+    const spinnerSvg = '<svg class="w-3.5 h-3.5 animate-spin text-emerald-600 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
+
+    if (btnDetail) { btnDetail.disabled = true; btnDetail.innerHTML = `${spinnerSvg} <span>Đang chờ...</span>`; }
+    if (btnSearch) btnSearch.disabled = true;
+    if (btnStop) { btnStop.style.display = 'flex'; btnStop.disabled = false; btnStop.innerHTML = '<span class="text-sm">⏹</span> Dừng'; }
+    if (timerEl) { timerEl.style.display = 'inline'; timerEl.innerText = '00:00'; }
+
+    // 3. Timer đếm giờ
+    window._downloadTimerSeconds = 0;
+    window._downloadTimerInterval = setInterval(() => {
+        window._downloadTimerSeconds++;
+        const m = String(Math.floor(window._downloadTimerSeconds / 60)).padStart(2, '0');
+        const s = String(window._downloadTimerSeconds % 60).padStart(2, '0');
+        if (timerEl) timerEl.innerText = `${m}:${s}`;
+    }, 1000);
+
+    // 4. Gửi lệnh mở hộp thoại chọn thư mục — dùng cùng luồng START_CRAWL
+    const requestId = 'dd_' + Math.random().toString(36).slice(2);
+
+    // Timeout 10 phút
+    const timeoutTimer = setTimeout(() => {
+        try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+        _onDownloadError({ message: 'Timeout — quá trình tải quá lâu (10 phút)' });
+    }, 10 * 60 * 1000);
+
+    window._pendingWebviewRequests[requestId] = (payload) => {
+        try {
+            const action = payload && payload.action;
+
+            // C# trả về thư mục đã chọn
+            if (action === 'OUTPUT_DIR_SELECTED') {
+                const out = payload.output_dir || payload.outputDir || '';
+                if (!out) {
+                    clearTimeout(timeoutTimer);
+                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                    _onDownloadStopped({ message: 'Người dùng đã hủy chọn thư mục' });
+                    return;
+                }
+                if (btnDetail) btnDetail.innerHTML = `${spinnerSvg} <span>Đang gửi lệnh...</span>`;
+
+                // Gửi START_CRAWL dùng backend có sẵn
+                window.chrome.webview.postMessage({
+                    action: 'START_CRAWL',
+                    output_dir: out,
+                    mst: window._loggedInMst || window._selectedCompanyMst || '',
+                    invoice_type: window._currentInvoiceType || 'ban_ra',
+                    requestId
+                });
+                return;
+            }
+
+            // Backend ACK
+            if (action === 'START_CRAWL_ACK') {
+                if (btnDetail) btnDetail.innerHTML = `${spinnerSvg} <span>Đang tải...</span>`;
+                return;
+            }
+
+            // Cập nhật tiến độ
+            if (action === 'CRAWL_STATUS_UPDATE') {
+                const total = payload.total_invoices || 0;
+                const st = payload.status || '';
+                if (btnDetail) {
+                    btnDetail.innerHTML = `${spinnerSvg} <span>${total > 0 ? total + ' HĐ' : (st || 'Đang tải...')}</span>`;
+                }
+                return;
+            }
+
+            // Lỗi
+            if (action === 'CRAWL_ERROR') {
+                clearTimeout(timeoutTimer);
+                try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                _onDownloadError({ message: payload.message || 'Lỗi không xác định' });
+                return;
+            }
+
+            // Hoàn tất
+            if (action === 'CRAWL_FINISHED') {
+                clearTimeout(timeoutTimer);
+                try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+                if (payload.status === 'stopped' || payload.is_stopped) {
+                    _onDownloadStopped(payload);
+                } else {
+                    _onDownloadFinished(payload);
+                }
+                return;
+            }
+        } catch (ex) {
+            clearTimeout(timeoutTimer);
+            try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
+            _onDownloadError({ message: ex.message || 'Lỗi không xác định' });
+        }
+    };
+
+    // 5. Kích hoạt: mở hộp thoại chọn thư mục
+    window.chrome.webview.postMessage({
+        action: 'REQUEST_SELECT_OUTPUT_DIR',
+        requestId
+    });
+}
+
+// Bấm nút [⏹ Dừng]
+function handleStopDownload() {
+    if (!(window.chrome?.webview)) return;
+    const btnStop = document.getElementById('btn-stop-download');
+    if (btnStop) { btnStop.innerHTML = '<span class="text-sm">⏳</span> Đang dừng...'; btnStop.disabled = true; }
+    // Gửi lệnh dừng dùng endpoint /stop có sẵn
+    window.chrome.webview.postMessage({ action: 'STOP_CRAWL' });
+}
+
+// Hoàn tất
+function _onDownloadFinished(payload) {
+    window._isDownloadingDetail = false;
+    _stopDownloadTimer();
+    _restoreDownloadUI();
+
+    const parsedCount = payload?.parsed_xml_count || (Array.isArray(payload?.parsed_invoices) ? payload.parsed_invoices.length : 0);
+    const totalFound = payload?.total_files_found || 0;
+    const totalSkipped = payload?.total_files_skipped || 0;
+    const totalFailed = payload?.total_files_failed || 0;
+
+    if (parsedCount > 0) {
+        window._parsedXmlInvoices = payload?.parsed_invoices || [];
+        console.log(`[XML Parser] Đã bóc tách thành công ${parsedCount} hóa đơn:`, window._parsedXmlInvoices);
+
+        let msg = `Đã bóc tách thành công: ${parsedCount} hóa đơn`;
+        if (totalFound > 0) {
+            msg += ` (Tổng quét: ${totalFound} file`;
+            if (totalSkipped > 0) msg += `, Bỏ qua: ${totalSkipped}`;
+            if (totalFailed > 0) msg += `, Lỗi: ${totalFailed}`;
+            msg += `)`;
+        }
+        window.showAlert?.('Thành công', msg, 'success');
+    } else {
+        window.showAlert?.('Thành công', 'Đã tải xong toàn bộ hóa đơn chi tiết!', 'success');
+    }
+}
+
+// Dừng
+function _onDownloadStopped(payload) {
+    window._isDownloadingDetail = false;
+    _stopDownloadTimer();
+    _restoreDownloadUI();
+    window.showAlert?.('Thông báo', payload.message || 'Đã dừng tiến trình', 'warning');
+}
+
+// Lỗi
+function _onDownloadError(payload) {
+    window._isDownloadingDetail = false;
+    _stopDownloadTimer();
+    _restoreDownloadUI();
+    window.showAlert?.('Lỗi', payload.message || 'Lỗi trong quá trình tải', 'error');
+}
+
+function _stopDownloadTimer() {
+    if (window._downloadTimerInterval) { clearInterval(window._downloadTimerInterval); window._downloadTimerInterval = null; }
+}
+
+function _restoreDownloadUI() {
+    const btnDetail = document.getElementById('btn-download-detail');
+    const btnSearch = document.getElementById('btn-open-search');
+    const btnStop = document.getElementById('btn-stop-download');
+    const timerEl = document.getElementById('download-timer');
+    const hasData = Array.isArray(window._invoiceCache) && window._invoiceCache.length > 0;
+    if (btnDetail) { btnDetail.disabled = !hasData; btnDetail.innerHTML = '<span class="text-sm">🗂️</span> Tải chi tiết'; }
+    if (btnSearch) btnSearch.disabled = false;
+    if (btnStop) { btnStop.style.display = 'none'; btnStop.disabled = false; btnStop.innerHTML = '<span class="text-sm">⏹</span> Dừng'; }
+    setTimeout(() => { if (timerEl) timerEl.style.display = 'none'; }, 4000);
 }

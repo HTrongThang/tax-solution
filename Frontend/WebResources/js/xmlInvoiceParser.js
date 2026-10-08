@@ -9,11 +9,18 @@
         /**
          * Quét thư mục và bóc tách danh sách hóa đơn XML
          * @param {string|null} directoryPath Đường dẫn thư mục (nếu null, C# sẽ tự mở FolderBrowserDialog)
+         * @param {object|Function} options Tùy chọn lọc {targetMst, isMuaVao, fromDate, toDate} hoặc callback onProgress
          * @param {Function} onProgress Callback cập nhật tiến độ: ({current, total, currentFile})
          * @param {number} timeoutMs Timeout tối đa (mặc định 10 phút)
-         * @returns {Promise<object>} Kết quả bóc tách bao gồm {invoices, totalFound, totalParsed, totalFailed, errors}
+         * @returns {Promise<object>} Kết quả bóc tách bao gồm {invoices, totalFound, totalParsed, totalSkipped, totalFailed, errors}
          */
-        parseDirectory: function (directoryPath = null, onProgress = null, timeoutMs = 10 * 60 * 1000) {
+        parseDirectory: function (directoryPath = null, options = {}, onProgress = null, timeoutMs = 10 * 60 * 1000) {
+            // Hỗ trợ truyền thẳng callback vào tham số thứ 2
+            if (typeof options === 'function') {
+                onProgress = options;
+                options = {};
+            }
+
             return new Promise((resolve, reject) => {
                 if (!window.chrome || !window.chrome.webview) {
                     reject(new Error('Môi trường WebView2 chưa sẵn sàng.'));
@@ -81,7 +88,11 @@
                     action: 'PARSE_XML_DIRECTORY',
                     requestId: requestId,
                     data: {
-                        directoryPath: directoryPath
+                        directoryPath: directoryPath,
+                        targetMst: options.targetMst || options.mst || window._loggedInMst || window._selectedCompanyMst || '',
+                        isMuaVao: typeof options.isMuaVao === 'boolean' ? options.isMuaVao : (window._currentInvoiceType === 'mua_vao'),
+                        fromDate: options.fromDate || '',
+                        toDate: options.toDate || ''
                     }
                 });
             });

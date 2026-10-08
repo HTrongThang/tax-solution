@@ -1,0 +1,7 @@
+{
+  "latest_version": "1.0.0",
+  "min_required_version": "1.0.0",
+  "download_url": "https://github.com/HTrongThang/tax-solution/releases/latest",
+  "release_notes": "Bản phát hành chính thức v1.0.0:\n- Tối ưu hóa tính năng xuất Excel Báo cáo tổng hợp và Bảng kê chi tiết chuẩn định dạng số.\n- Tích hợp hệ thống đồng bộ hóa đơn và quản lý tài khoản thuế đa công ty.\n- Tính năng tự động phát hiện và kiểm tra phiên bản mới.",
+  "is_force_update": false
+}

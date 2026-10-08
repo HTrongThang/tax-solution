@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -195,14 +196,26 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 		return
 	}
 
-	// 2. Đọc output_dir từ JSON body (C# gửi { "path": "..." })
+	// 2. Đọc output_dir, mst, invoice_type từ JSON body
 	var req struct {
-		Path string `json:"path"`
+		Path        string `json:"path"`
+		MST         string `json:"mst"`
+		InvoiceType string `json:"invoice_type"`
 	}
 
 	outputDir := ""
-	if err := c.ShouldBindJSON(&req); err == nil && req.Path != "" {
+	mst := ""
+	invoiceType := "BanRa"
+	if err := c.ShouldBindJSON(&req); err == nil {
 		outputDir = req.Path
+		mst = req.MST
+		// Chuyển đổi invoice_type thành tên đẹp cho thư mục
+		switch req.InvoiceType {
+		case "mua_vao":
+			invoiceType = "MuaVao"
+		default:
+			invoiceType = "BanRa"
+		}
 	}
 
 	// Nếu không có giá trị hợp lệ, mới dùng fallback
@@ -211,9 +224,17 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 		fmt.Println("⚠️ Không có output_dir, sử dụng mặc định: " + outputDir)
 	}
 
-	// 3. TỰ ĐỘNG TẠO THƯ MỤC (Quan trọng)
-	// Giúp Bot không bị crash nếu thư mục Thắng truyền vào chưa có trên ổ cứng
-	err := os.MkdirAll(outputDir, os.ModePerm)
+	// 3. TẠO THƯ MỤC CON theo format: MST_ChieuHD_NgayGio
+	timeStr := time.Now().Format("20060102_150405")
+	subFolder := fmt.Sprintf("%s_%s_%s", mst, invoiceType, timeStr)
+	if mst == "" {
+		subFolder = fmt.Sprintf("%s_%s", invoiceType, timeStr)
+	}
+	finalDir := filepath.Join(outputDir, subFolder)
+
+	// Tự động tạo thư mục (Quan trọng)
+	// Giúp Bot không bị crash nếu thư mục truyền vào chưa có trên ổ cứng
+	err := os.MkdirAll(finalDir, os.ModePerm)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.CrawlResponse{
 			Status:  "error",
@@ -223,12 +244,12 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 	}
 
 	// 4. Gán đường dẫn vào Crawler để các hàm con (ExtractAndMove) sử dụng
-	h.Crawler.OutputDir = outputDir
+	h.Crawler.OutputDir = finalDir
 
 	// 5. KÍCH HOẠT CHẠY NGẦM (GOROUTINE)
 	// Giải phóng cho Postman/ .NET ngay lập tức
 	go func() {
-		fmt.Printf("🤖 Hệ thống dụng bắt đầu làm việc ngầm. Kết quả sẽ lưu tại: %s\n", outputDir)
+		fmt.Printf("🤖 Hệ thống dụng bắt đầu làm việc ngầm. Kết quả sẽ lưu tại: %s\n", finalDir)
 
 		// Gọi hàm cào đa trang của Thắng
 		h.Crawler.CrawlAllPages()

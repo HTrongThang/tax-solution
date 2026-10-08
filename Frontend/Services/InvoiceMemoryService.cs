@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Frontend.Models;
 
 namespace Frontend.Services
 {
@@ -14,6 +15,7 @@ namespace Frontend.Services
         public static InvoiceMemoryService Instance => _instance.Value;
 
         private readonly List<dynamic> _invoices = new List<dynamic>();
+        private readonly List<InvoiceXmlModel> _parsedXmlInvoices = new List<InvoiceXmlModel>();
         private readonly object _lock = new object();
 
         public string? CurrentMst { get; private set; }
@@ -30,7 +32,19 @@ namespace Frontend.Services
             }
         }
 
+        public int ParsedXmlCount
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _parsedXmlInvoices.Count;
+                }
+            }
+        }
+
         public bool HasData => Count > 0;
+        public bool HasParsedXmlData => ParsedXmlCount > 0;
 
         /// <summary>
         /// 1. LƯU (SET): Nạp danh sách hóa đơn vào RAM cho công ty hiện tại.
@@ -51,7 +65,23 @@ namespace Frontend.Services
         }
 
         /// <summary>
-        /// 2. LẤY (GET): Lấy toàn bộ danh sách hóa đơn từ RAM ra để hiển thị, lọc hoặc xuất Excel.
+        /// 2. LƯU (SET) XML ĐÃ BÓC TÁCH: Lưu danh sách hóa đơn XML chi tiết vào RAM để xuất Excel ngay lập tức.
+        /// </summary>
+        public void SetParsedXmlInvoices(IEnumerable<InvoiceXmlModel> xmlInvoices)
+        {
+            lock (_lock)
+            {
+                _parsedXmlInvoices.Clear();
+                if (xmlInvoices != null)
+                {
+                    _parsedXmlInvoices.AddRange(xmlInvoices);
+                }
+                System.Diagnostics.Debug.WriteLine($"[InvoiceMemoryService] Đã nạp {_parsedXmlInvoices.Count} hóa đơn XML chi tiết vào RAM.");
+            }
+        }
+
+        /// <summary>
+        /// 3. LẤY (GET): Lấy toàn bộ danh sách hóa đơn từ RAM ra để hiển thị, lọc hoặc xuất Excel.
         /// </summary>
         public List<dynamic> GetInvoices()
         {
@@ -62,17 +92,30 @@ namespace Frontend.Services
         }
 
         /// <summary>
-        /// 3. XÓA (CLEAR): Giải phóng hoàn toàn bộ nhớ RAM.
+        /// 4. LẤY (GET) XML ĐÃ BÓC TÁCH: Lấy danh sách hóa đơn XML chi tiết từ RAM.
+        /// </summary>
+        public List<InvoiceXmlModel> GetParsedXmlInvoices()
+        {
+            lock (_lock)
+            {
+                return new List<InvoiceXmlModel>(_parsedXmlInvoices);
+            }
+        }
+
+        /// <summary>
+        /// 5. XÓA (CLEAR): Giải phóng hoàn toàn bộ nhớ RAM.
         /// </summary>
         public void Clear(string? reason = null)
         {
             lock (_lock)
             {
                 int prevCount = _invoices.Count;
+                int prevXmlCount = _parsedXmlInvoices.Count;
                 _invoices.Clear();
+                _parsedXmlInvoices.Clear();
                 CurrentMst = null;
                 LastUpdated = null;
-                System.Diagnostics.Debug.WriteLine($"[InvoiceMemoryService] Đã giải phóng RAM ({prevCount} hóa đơn). Lý do: {reason ?? "Không rõ"}");
+                System.Diagnostics.Debug.WriteLine($"[InvoiceMemoryService] Đã giải phóng RAM ({prevCount} hóa đơn, {prevXmlCount} XML chi tiết). Lý do: {reason ?? "Không rõ"}");
             }
         }
     }

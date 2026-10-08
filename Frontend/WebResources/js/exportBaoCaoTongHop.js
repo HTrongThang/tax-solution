@@ -77,12 +77,17 @@
                 return;
             }
 
-            // 2. Lấy dữ liệu từ RAM (ưu tiên getInvoiceRAM vì crawlerTable.js ghi đè setInvoiceRAM)
-            var invoices = (window.getInvoiceRAM ? window.getInvoiceRAM() : null)
+            // 2. Lấy dữ liệu từ RAM
+            var generalInvoices = (window.getInvoiceRAM ? window.getInvoiceRAM() : null)
                 || (window.InvoiceRamManager ? window.InvoiceRamManager.get() : null)
                 || window._currentInvoicesRAM
                 || window._invoiceCache
                 || [];
+
+            var parsedXmls = window._parsedXmlInvoices;
+            var invoices = (Array.isArray(generalInvoices) && generalInvoices.length > 0)
+                ? generalInvoices
+                : (Array.isArray(parsedXmls) && parsedXmls.length > 0 ? parsedXmls : []);
 
             if (!invoices || invoices.length === 0) {
                 window.showAlert
@@ -174,7 +179,130 @@
         }
     }
 
+    // ────────────────────────────────────────────────
+    // HÀM CHÍNH 2: XUẤT BẢNG KÊ CHI TIẾT DÒNG HÀNG (16 CỘT)
+    // ────────────────────────────────────────────────
+    function exportBangKeChiTiet() {
+        try {
+            // 1. Kiểm tra WebView2
+            if (!(window.chrome && window.chrome.webview)) {
+                window.showAlert
+                    ? window.showAlert('Lỗi', 'Không tìm thấy kết nối WebView2! Hãy chạy ứng dụng từ chương trình chính.', 'error')
+                    : alert('WebView2 chưa sẵn sàng!');
+                return;
+            }
+
+            // 2. Lấy dữ liệu từ RAM (ưu tiên danh sách đã bóc tách chi tiết XML nếu có)
+            var parsedXmls = window._parsedXmlInvoices;
+            var generalInvoices = (window.getInvoiceRAM ? window.getInvoiceRAM() : null)
+                || (window.InvoiceRamManager ? window.InvoiceRamManager.get() : null)
+                || window._currentInvoicesRAM
+                || window._invoiceCache
+                || [];
+
+            var invoices = (Array.isArray(parsedXmls) && parsedXmls.length > 0)
+                ? parsedXmls
+                : generalInvoices;
+
+            if (!invoices || invoices.length === 0) {
+                window.showAlert
+                    ? window.showAlert('Thông báo', 'Không có dữ liệu hóa đơn trong bộ nhớ để xuất!\nVui lòng tra cứu hóa đơn hoặc Tải chi tiết trước.', 'warning')
+                    : alert('Không có dữ liệu hóa đơn trong bộ nhớ để xuất!');
+                return;
+            }
+
+            // Kiểm tra xem đã có bóc tách dòng hàng chi tiết chưa
+            var hasDetails = invoices.some(function (inv) {
+                return (Array.isArray(inv.HoaDons) && inv.HoaDons.length > 0)
+                    || (Array.isArray(inv.hoaDons) && inv.hoaDons.length > 0);
+            });
+
+            if (!hasDetails) {
+                var confirmExport = confirm(
+                    '⚠️ Dữ liệu hiện tại chưa bóc tách file XML (chưa có danh mục từng món hàng).\n\n' +
+                    '👉 Bạn nên bấm nút [📥 Tải chi tiết] để tự động tải XML và bóc tách đầy đủ dòng hàng.\n\n' +
+                    'Bạn có muốn tiếp tục xuất với dữ liệu tổng quan không?'
+                );
+                if (!confirmExport) return;
+            }
+
+            // 3. Thu thập thông tin bộ lọc
+            var isMuaVao = (window._currentInvoiceType || 'ban_ra') === 'mua_vao';
+            var dateRange = getDateRange();
+            var mst = getCurrentMst();
+
+            // 4. Chuẩn hóa dữ liệu trước khi gửi
+            if (typeof window.sanitizeInvoiceData === 'function') {
+                invoices.forEach(function (inv) { window.sanitizeInvoiceData(inv); });
+            }
+
+            var requestId = 'excel_detail_' + Math.random().toString(36).slice(2);
+            window._pendingWebviewRequests = window._pendingWebviewRequests || {};
+
+            window._pendingWebviewRequests[requestId] = function (payload) {
+                var action = payload && payload.action;
+
+                if (action === 'EXPORT_EXCEL_PROCESSING') {
+                    console.log('[ExportBKCT] Đang xử lý xuất Bảng kê chi tiết...');
+                    return;
+                }
+
+                if (action === 'EXPORT_EXCEL_DONE') {
+                    delete window._pendingWebviewRequests[requestId];
+                    var filePath = payload.filePath || '';
+                    console.log('[ExportBKCT] ✅ Xuất thành công: ' + filePath);
+                    if (window.showAlert) {
+                        window.showAlert(
+                            'Xuất Bảng kê chi tiết thành công! 🎉',
+                            'Đã xuất chi tiết từng dòng hàng hóa ra file Excel.\nFile đã được mở tự động.',
+                            'success'
+                        );
+                    }
+                    return;
+                }
+
+                if (action === 'EXPORT_EXCEL_ERROR') {
+                    delete window._pendingWebviewRequests[requestId];
+                    var msg = payload.message || 'Lỗi không xác định';
+                    console.error('[ExportBKCT] ❌ Lỗi:', msg);
+                    if (!msg.includes('hủy') && window.showAlert) {
+                        window.showAlert('Lỗi xuất Excel', msg, 'error');
+                    }
+                    return;
+                }
+            };
+
+            setTimeout(function () {
+                if (window._pendingWebviewRequests[requestId]) {
+                    delete window._pendingWebviewRequests[requestId];
+                    console.warn('[ExportBKCT] Timeout sau 60 giây');
+                }
+            }, 60000);
+
+            // GỬI MESSAGE XUỐNG C# VỚI reportType = 'bang_ke_chi_tiet'
+            window.chrome.webview.postMessage({
+                action: 'EXPORT_EXCEL',
+                requestId: requestId,
+                data: {
+                    reportType: 'bang_ke_chi_tiet',
+                    invoices: JSON.stringify(invoices),
+                    isMuaVao: isMuaVao,
+                    fromDate: dateRange.fromDisplay,
+                    toDate: dateRange.toDisplay,
+                    mst: mst
+                }
+            });
+
+        } catch (error) {
+            console.error('[ExportBKCT] ❌ Lỗi:', error);
+            if (window.showAlert) {
+                window.showAlert('Lỗi', 'Đã xảy ra lỗi: ' + (error.message || error), 'error');
+            }
+        }
+    }
+
     // Đăng ký toàn cục
     window.exportBaoCaoTongHop = exportBaoCaoTongHop;
+    window.exportBangKeChiTiet = exportBangKeChiTiet;
 
 })(window);

@@ -29,7 +29,7 @@
                     </svg>
                 </div>
                 <h1 class="text-3xl font-bold tracking-tight mb-2">TaxScraper</h1>
-                <p class="text-blue-200 opacity-90 text-sm mb-16">Hệ thống khai thác dữ liệu</p>
+                <p class="text-blue-200 opacity-90 text-sm mb-16">Hệ thống khai thác dữ liệu <span id="login-version" class="app-version-text text-xs opacity-80 font-mono ml-1 bg-white/10 px-1.5 py-0.5 rounded"></span></p>
             </div>
 
             <div class="space-y-4 text-xs text-gray-400">
@@ -88,5 +88,12 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="./js/login.js"></script>
     <script src="./js/common.js"></script>
+    <script>
+        (function () {
+            const ver = window.appVersion || localStorage.getItem('app_version') || '';
+            const el = document.getElementById('login-version');
+            if (el && ver) el.innerText = ver;
+        })();
+    </script>
 </body>
 </html>

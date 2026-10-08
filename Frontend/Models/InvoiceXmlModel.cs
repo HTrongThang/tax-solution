@@ -163,6 +163,11 @@ namespace Frontend.Models
         /// Địa chỉ người mua (&lt;NMua&gt; -> &lt;DChi&gt;)
         /// </summary>
         public string NMuaDChi { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Họ và tên người mua hàng (&lt;NMua&gt; -> &lt;HVTNMHang&gt;)
+        /// </summary>
+        public string HVTNMHang { get; set; } = string.Empty;
         #endregion
 
         #region Tổng tiền hóa đơn (<TToan>)
@@ -215,14 +220,30 @@ namespace Frontend.Models
     }
 
     /// <summary>
+    /// Tùy chọn lọc tại chỗ (In-flight Filter) khi quét và bóc tách XML
+    /// </summary>
+    public class XmlParseOptions
+    {
+        public string? TargetMst { get; set; }
+        public bool? IsMuaVao { get; set; }
+        public DateTime? FromDate { get; set; }
+        public DateTime? ToDate { get; set; }
+        public string? FromDateStr { get; set; }
+        public string? ToDateStr { get; set; }
+        public bool DeleteAfterParsing { get; set; } = false;
+    }
+
+    /// <summary>
     /// Kết quả tổng hợp sau khi quét và bóc tách thư mục XML
     /// </summary>
     public class XmlParseResult
     {
         public bool Success { get; set; }
         public string Message { get; set; } = string.Empty;
+        public string TargetFolder { get; set; } = string.Empty;
         public int TotalFilesFound { get; set; }
         public int TotalFilesParsed { get; set; }
+        public int TotalFilesSkipped { get; set; }
         public int TotalFilesFailed { get; set; }
         public List<InvoiceXmlModel> Invoices { get; set; } = new List<InvoiceXmlModel>();
         public List<string> Errors { get; set; } = new List<string>();

@@ -27,6 +27,9 @@ namespace Frontend.Views
         private CancellationTokenSource _searchCts;
         // Current crawl request id received from frontend (if any)
         private string _currentCrawlRequestId;
+        private string _currentCrawlOutputDir;
+        private string _currentCrawlMst;
+        private string _currentCrawlInvoiceType;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
         private List<CompanyModel> _cachedCompanies = new List<CompanyModel>();
         // Lưu trữ danh sách hóa đơn hiện tại trong RAM C# (chỉ giữ 1 công ty đang làm việc)
@@ -39,6 +42,7 @@ namespace Frontend.Views
         public UserForm()
         {
             InitializeComponent();
+            this.Text = $"TaxSolution - Quản lý Hóa đơn & Khai thác Thuế ({AppVersionHelper.DisplayVersion})";
             this.Load += UserForm_Load;
             this.FormClosing += UserForm_FormClosing;
             this.FormClosed += UserForm_FormClosed;
@@ -58,6 +62,9 @@ namespace Frontend.Views
             var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await webViewUser.EnsureCoreWebView2Async(env);
+            await webViewUser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                $"window.appVersion = '{AppVersionHelper.DisplayVersion}'; localStorage.setItem('app_version', '{AppVersionHelper.DisplayVersion}');"
+            );
 
             // 3. Cấu hình Mapping (Đảm bảo folder WebResources tồn tại)
             string webResourcesPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebResources");
@@ -76,6 +83,16 @@ namespace Frontend.Views
                 if (args.IsSuccess)
                 {
                     await SyncHeaderWithSession();
+
+                    // Đồng bộ số phiên bản vào giao diện HTML (sidebar, footer,...)
+                    try
+                    {
+                        await webViewUser.CoreWebView2.ExecuteScriptAsync(
+                            $"document.querySelectorAll('.app-version-text').forEach(el => el.innerText = '{AppVersionHelper.DisplayVersion}');"
+                        );
+                    }
+                    catch { }
+
                     try
                     {
                         string response = await _taxService.Init();
@@ -145,6 +162,9 @@ namespace Frontend.Views
                     if(nameEl) nameEl.innerText = {safeName};
                     if(roleEl) roleEl.innerText = {safeRole};
                     if(avatarEl) avatarEl.innerText = {safeInitials};
+
+                    localStorage.setItem('app_version', '{AppVersionHelper.DisplayVersion}');
+                    document.querySelectorAll('.app-version-text').forEach(el => el.innerText = '{AppVersionHelper.DisplayVersion}');
                 }})();";
 
             await webViewUser.CoreWebView2.ExecuteScriptAsync(jsCode);
@@ -169,6 +189,38 @@ namespace Frontend.Views
                     {
                         this.Close();
                     }));
+                    break;
+                case "CHECK_APP_UPDATE":
+                    _ = Task.Run(async () =>
+                    {
+                        var updateResult = await UpdateService.CheckForUpdateAsync();
+                        this.Invoke(new Action(() =>
+                        {
+                            if (updateResult.Success && updateResult.HasUpdate)
+                            {
+                                var dlg = new UpdateDialogForm(updateResult);
+                                dlg.ShowDialog(this);
+                            }
+                            else if (updateResult.Success && !updateResult.HasUpdate)
+                            {
+                                MessageBox.Show(
+                                    $"Bạn đang sử dụng phiên bản mới nhất ({AppVersionHelper.DisplayVersion}).\nKhông có bản cập nhật mới nào.",
+                                    "Kiểm tra cập nhật",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Information
+                                );
+                            }
+                            else
+                            {
+                                MessageBox.Show(
+                                    $"Không thể kết nối đến máy chủ kiểm tra cập nhật.\nChi tiết: {updateResult.ErrorMessage}",
+                                    "Lỗi kiểm tra cập nhật",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Warning
+                                );
+                            }
+                        }));
+                    });
                     break;
                 case "ADD_AND_SAVE_MST":
                     try
@@ -399,9 +451,8 @@ namespace Frontend.Views
                         _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"if(window.showAlert) window.showAlert('Lỗi hệ thống', {safeCritMsg}, 'error');");
                     }
                     break;
-                // Trong phần xử lý Message từ WebView2
                 case "REQUEST_LOGOUT":
-
+                    InvoiceMemoryService.Instance.Clear("Đăng xuất tài khoản");
                     var (status, message) = await _taxService.LogoutTaxAsync();
 
                     if (status == "success")
@@ -529,6 +580,8 @@ namespace Frontend.Views
                 case "START_CRAWL":
                     string outputDir = packet?.output_dir?.ToString();
                     string requestId = packet?.requestId != null ? packet.requestId.ToString() : null;
+                    string crawlMst = packet?.mst != null ? packet.mst.ToString() : "";
+                    string crawlInvoiceType = packet?.invoice_type != null ? packet.invoice_type.ToString() : "ban_ra";
 
                     if (string.IsNullOrWhiteSpace(outputDir))
                     {
@@ -543,7 +596,30 @@ namespace Frontend.Views
                     var ackPayload = new { action = "START_CRAWL_ACK", requestId = requestId, status = "accepted", message = "Yêu cầu crawl đã được nhận" };
                     await PostWebMessageAsJson(ackPayload);
 
-                    await HandleStartCrawl(outputDir, requestId);
+                    await HandleStartCrawl(outputDir, requestId, crawlMst, crawlInvoiceType);
+                    break;
+
+                case "STOP_CRAWL":
+                case "STOP_DOWNLOAD":
+                case "STOP_SEARCH":
+                    try
+                    {
+                        await _taxService.StopTaxAsync();
+                        _isCrawling = false;
+                        await PostWebMessageAsJson(new
+                        {
+                            action = "CRAWL_FINISHED",
+                            status = "stopped",
+                            is_stopped = true,
+                            message = "Tiến trình đã được dừng.",
+                            requestId = _currentCrawlRequestId
+                        });
+                        _currentCrawlRequestId = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("Lỗi STOP_CRAWL: " + ex.Message);
+                    }
                     break;
 
                 case "EXPORT_EXCEL":
@@ -563,11 +639,21 @@ namespace Frontend.Views
                             try
                             {
                                 string dirLabel = excelIsMuaVao ? "MuaVao" : "BanRa";
-                                string defaultFileName = $"BaoCaoTongHop_{dirLabel}_{excelMst}.xlsx";
+                                bool isDetailReport = reportType == "bang_ke_chi_tiet";
+                                string fromClean = excelFromDate?.Replace("/", "").Replace("-", "") ?? "";
+                                string toClean = excelToDate?.Replace("/", "").Replace("-", "") ?? "";
+                                string dateSuffix = !string.IsNullOrEmpty(fromClean) && !string.IsNullOrEmpty(toClean) ? $"_{fromClean}_{toClean}" : "";
+                                string randSuffix = $"_{DateTime.Now:HHmmss}_{Random.Shared.Next(100, 999)}";
+                                string defaultFileName = isDetailReport
+                                    ? $"BangKeChiTiet_{dirLabel}_{excelMst}{dateSuffix}{randSuffix}.xlsx"
+                                    : $"BaoCaoTongHop_{dirLabel}_{excelMst}{dateSuffix}{randSuffix}.xlsx";
+                                string dialogTitle = isDetailReport
+                                    ? "Chá»n nÆ¡i lÆ°u file Excel báº£ng kÃª chi tiáº¿t hÃ ng hÃ³a"
+                                    : "Chá»n nÆ¡i lÆ°u file Excel bÃ¡o cÃ¡o tá»•ng há»£p";
 
                                 using var sfd = new SaveFileDialog
                                 {
-                                    Title = "Chọn nơi lưu file Excel báo cáo tổng hợp",
+                                    Title = dialogTitle,
                                     Filter = "Excel Files (*.xlsx)|*.xlsx",
                                     FileName = defaultFileName,
                                     DefaultExt = "xlsx",
@@ -576,11 +662,11 @@ namespace Frontend.Views
 
                                 if (sfd.ShowDialog() != DialogResult.OK)
                                 {
-                                    // Người dùng bấm Cancel
+                                    // NgÆ°á»i dÃ¹ng báº¥m Cancel
                                     var cancelPayload = new
                                     {
                                         action = "EXPORT_EXCEL_ERROR",
-                                        message = "Người dùng đã hủy chọn nơi lưu.",
+                                        message = "NgÆ°á»i dÃ¹ng Ä‘Ã£ há»§y chá»n nÆ¡i lÆ°u.",
                                         requestId = excelRequestId
                                     };
                                     await PostWebMessageAsJson(cancelPayload);
@@ -588,44 +674,61 @@ namespace Frontend.Views
                                 }
 
                                 string selectedPath = sfd.FileName;
-                                string selectedDir = Path.GetDirectoryName(selectedPath);
+                                string selectedDir = Path.GetDirectoryName(selectedPath) ?? "";
 
-                                // Thông báo đang xử lý
+                                // ThÃ´ng bÃ¡o Ä‘ang xá»­ lÃ½
                                 var processingPayload = new
                                 {
                                     action = "EXPORT_EXCEL_PROCESSING",
-                                    message = "Đang tạo file Excel...",
+                                    message = isDetailReport ? "Äang táº¡o file Excel báº£ng kÃª chi tiáº¿t..." : "Äang táº¡o file Excel...",
                                     requestId = excelRequestId
                                 };
                                 await PostWebMessageAsJson(processingPayload);
 
-                                // Chạy xuất Excel trên background thread để không block UI
+                                string savedFilePath = "";
+                                // Cháº¡y xuáº¥t Excel trÃªn background thread Ä‘á»ƒ khÃ´ng block UI
                                 await Task.Run(() =>
                                 {
                                     var exportService = new ExportExcelService();
-                                    exportService.ExportBaoCaoTongHop(
-                                        invoicesJsonRaw,
-                                        selectedDir,
-                                        excelIsMuaVao,
-                                        excelFromDate,
-                                        excelToDate,
-                                        excelMst
-                                    );
+                                    if (isDetailReport)
+                                    {
+                                        savedFilePath = exportService.ExportBangKeChiTiet(
+                                            invoicesJsonRaw,
+                                            selectedPath,
+                                            excelIsMuaVao,
+                                            excelFromDate,
+                                            excelToDate,
+                                            excelMst
+                                        );
+                                    }
+                                    else
+                                    {
+                                        savedFilePath = exportService.ExportBaoCaoTongHop(
+                                            invoicesJsonRaw,
+                                            selectedPath,
+                                            excelIsMuaVao,
+                                            excelFromDate,
+                                            excelToDate,
+                                            excelMst
+                                        );
+                                    }
                                 });
 
-                                // Thành công
+                                string finalPath = !string.IsNullOrEmpty(savedFilePath) && File.Exists(savedFilePath) ? savedFilePath : selectedPath;
+
+                                // ThÃ nh cÃ´ng
                                 var successPayload = new
                                 {
                                     action = "EXPORT_EXCEL_DONE",
-                                    message = "Xuất Excel thành công!",
-                                    filePath = selectedPath,
+                                    message = isDetailReport ? "Xuáº¥t Báº£ng kÃª chi tiáº¿t hÃ ng hÃ³a thÃ nh cÃ´ng!" : "Xuáº¥t Excel thÃ nh cÃ´ng!",
+                                    filePath = finalPath,
                                     requestId = excelRequestId
                                 };
                                 await PostWebMessageAsJson(successPayload);
 
-                                // Tự mở file Excel nếu người dùng muốn
-                                try { Process.Start(new ProcessStartInfo(selectedPath) { UseShellExecute = true }); }
-                                catch { /* Bỏ qua nếu không mở được */ }
+                                // Tá»± má»Ÿ file Excel náº¿u ngÆ°á»i dÃ¹ng muá»‘n
+                                try { Process.Start(new ProcessStartInfo(finalPath) { UseShellExecute = true }); }
+                                catch { /* Bá» qua náº¿u khÃ´ng má»Ÿ Ä‘Æ°á»£c */ }
                             }
                             catch (Exception exInner)
                             {
@@ -652,6 +755,14 @@ namespace Frontend.Views
                         string xmlRequestId = packet?.requestId != null ? packet.requestId.ToString() : null;
                         string directoryPath = packet?.data?.directoryPath != null ? packet.data.directoryPath.ToString() : null;
 
+                        var parseOptions = new XmlParseOptions
+                        {
+                            TargetMst = packet?.data?.targetMst != null ? packet.data.targetMst.ToString() : (packet?.data?.mst != null ? packet.data.mst.ToString() : null),
+                            IsMuaVao = packet?.data?.isMuaVao != null ? (bool)packet.data.isMuaVao : null,
+                            FromDateStr = packet?.data?.fromDate != null ? packet.data.fromDate.ToString() : null,
+                            ToDateStr = packet?.data?.toDate != null ? packet.data.toDate.ToString() : null
+                        };
+
                         // Nếu không truyền directoryPath, mở FolderBrowserDialog để người dùng chọn
                         if (string.IsNullOrWhiteSpace(directoryPath))
                         {
@@ -666,7 +777,7 @@ namespace Frontend.Views
 
                                 if (fbd.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
                                 {
-                                    await ExecuteParseXmlDirectoryAsync(fbd.SelectedPath, xmlRequestId);
+                                    await ExecuteParseXmlDirectoryAsync(fbd.SelectedPath, xmlRequestId, parseOptions);
                                 }
                                 else
                                 {
@@ -682,7 +793,7 @@ namespace Frontend.Views
                         }
                         else
                         {
-                            _ = ExecuteParseXmlDirectoryAsync(directoryPath, xmlRequestId);
+                            _ = ExecuteParseXmlDirectoryAsync(directoryPath, xmlRequestId, parseOptions);
                         }
                     }
                     catch (Exception exOuter)
@@ -697,7 +808,7 @@ namespace Frontend.Views
         /// <summary>
         /// Quét và bóc tách dữ liệu hóa đơn từ các file XML trong thư mục được chỉ định
         /// </summary>
-        private async Task ExecuteParseXmlDirectoryAsync(string directoryPath, string? requestId)
+        private async Task ExecuteParseXmlDirectoryAsync(string directoryPath, string? requestId, XmlParseOptions? options = null)
         {
             try
             {
@@ -731,7 +842,7 @@ namespace Frontend.Views
                 });
 
                 // Chạy ngầm việc quét và bóc tách file XML
-                var result = await XmlInvoiceParserService.Instance.ParseDirectoryAsync(directoryPath, existingInvoices, progress);
+                var result = await XmlInvoiceParserService.Instance.ParseDirectoryAsync(directoryPath, options, existingInvoices, progress);
 
                 // Trả kết quả hoàn tất về cho Frontend
                 await PostWebMessageAsJson(new
@@ -742,6 +853,7 @@ namespace Frontend.Views
                     message = result.Message,
                     totalFound = result.TotalFilesFound,
                     totalParsed = result.TotalFilesParsed,
+                    totalSkipped = result.TotalFilesSkipped,
                     totalFailed = result.TotalFilesFailed,
                     invoices = result.Invoices,
                     errors = result.Errors
@@ -955,11 +1067,19 @@ namespace Frontend.Views
         }
 
 
-        private async Task HandleStartCrawl(string path, string requestId = null)
+        private async Task HandleStartCrawl(string path, string requestId = null, string mst = "", string invoiceType = "ban_ra")
         {
             if (_isCrawling) return;
-            // Pass requestId to backend if TaxService supports it in future. For now, store locally.
-            var (status, message) = await _taxService.StartCrawlAsync(path);
+            _currentCrawlOutputDir = path;
+            _currentCrawlMst = mst;
+            _currentCrawlInvoiceType = invoiceType;
+            _currentCrawlRequestId = requestId;
+
+            var (status, message, finalOutputDir) = await _taxService.StartCrawlAsync(path, mst, invoiceType);
+            if (!string.IsNullOrWhiteSpace(finalOutputDir))
+            {
+                _currentCrawlOutputDir = finalOutputDir;
+            }
 
             if (status == "success")
             {
@@ -1001,9 +1121,61 @@ namespace Frontend.Views
             finally
             {
                 _isCrawling = false;
-                await PostWebMessageAsJson(new { action = "CRAWL_FINISHED", requestId = _currentCrawlRequestId });
+
+                // TỰ ĐỘNG BÓC TÁCH DỮ LIỆU XML NGAY SAU KHI TẢI XONG
+                XmlParseResult parseResult = null;
+                if (!string.IsNullOrWhiteSpace(_currentCrawlOutputDir) && Directory.Exists(_currentCrawlOutputDir))
+                {
+                    try
+                    {
+                        await PostWebMessageAsJson(new
+                        {
+                            action = "CRAWL_STATUS_UPDATE",
+                            status = "Đang bóc tách chi tiết dữ liệu XML...",
+                            is_running = true,
+                            total_invoices = 0,
+                            requestId = _currentCrawlRequestId
+                        });
+
+                        var parseOptions = new XmlParseOptions
+                        {
+                            TargetMst = _currentCrawlMst,
+                            IsMuaVao = _currentCrawlInvoiceType == "mua_vao",
+                            DeleteAfterParsing = true
+                        };
+
+                        parseResult = await XmlInvoiceParserService.Instance.ParseDirectoryAsync(
+                            _currentCrawlOutputDir,
+                            parseOptions,
+                            InvoiceMemoryService.Instance.GetInvoices()
+                        );
+
+                        if (parseResult?.Invoices != null && parseResult.Invoices.Count > 0)
+                        {
+                            InvoiceMemoryService.Instance.SetParsedXmlInvoices(parseResult.Invoices);
+                        }
+                    }
+                    catch (Exception exParse)
+                    {
+                        Debug.WriteLine("[UserForm] Lỗi tự động bóc tách XML sau khi cào: " + exParse.Message);
+                    }
+                }
+
+                await PostWebMessageAsJson(new
+                {
+                    action = "CRAWL_FINISHED",
+                    requestId = _currentCrawlRequestId,
+                    output_dir = _currentCrawlOutputDir,
+                    total_files_found = parseResult?.TotalFilesFound ?? 0,
+                    parsed_xml_count = parseResult?.TotalFilesParsed ?? 0,
+                    total_files_skipped = parseResult?.TotalFilesSkipped ?? 0,
+                    total_files_failed = parseResult?.TotalFilesFailed ?? 0,
+                    parsed_invoices = parseResult?.Invoices
+                });
+
                 // clear stored request id after finishing
                 _currentCrawlRequestId = null;
+                _currentCrawlOutputDir = null;
             }
         }
         private Task PostWebMessageAsJson(object data)

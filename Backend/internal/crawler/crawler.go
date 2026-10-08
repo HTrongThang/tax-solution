@@ -1435,13 +1435,13 @@ func (c *CrawlerService) CrawlAllPages() {
 		var rows rod.Elements
 		for retry := 0; retry < 5; retry++ {
 			markerId := "crawler-row-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-			res := c.Page.MustEval(fmt.Sprintf(`(marker) => {
+			res := c.Page.MustEval(fmt.Sprintf(`() => {
 				const activePanes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'))
 					.filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
 				const container = activePanes[activePanes.length - 1] || document;
 				const activeRows = Array.from(container.querySelectorAll(".ant-table-tbody tr.ant-table-row"));
 				activeRows.forEach((r, idx) => {
-					r.setAttribute('data-crawl-row', marker + '-' + idx);
+					r.setAttribute('data-crawl-row', '%s' + '-' + idx);
 				});
 				return activeRows.length;
 			}`, markerId))
@@ -1510,6 +1510,9 @@ func (c *CrawlerService) CrawlAllPages() {
 }
 
 func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) error {
+	if c.StopRequested {
+		return fmt.Errorf("tiến trình đã bị người dùng dừng")
+	}
 	fmt.Printf("\n🔍 --- Đang xử lý dòng %d ---\n", index+1)
 
 	if row == nil {
@@ -1541,7 +1544,7 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	var btnDownload *rod.Element
 	_ = rod.Try(func() {
 		markerId := "crawler-dl-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		res := c.Page.MustEval(fmt.Sprintf(`(marker) => {
+		res := c.Page.MustEval(fmt.Sprintf(`() => {
 			const activePanes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'))
 				.filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
 			const container = activePanes[activePanes.length - 1] || document;
@@ -1570,7 +1573,7 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 			}
 
 			if (target) {
-				target.setAttribute('data-dl-target', marker);
+				target.setAttribute('data-dl-target', '%s');
 				return true;
 			}
 			return false;
@@ -1748,6 +1751,9 @@ func GetLatestFile(dir string) (string, error) {
 }
 func (c *CrawlerService) retry(attempts int, sleep time.Duration, f func() bool) error {
 	for i := 0; i < attempts; i++ {
+		if c.StopRequested {
+			return fmt.Errorf("tiến trình đã bị người dùng dừng")
+		}
 		if f() {
 			return nil
 		}
