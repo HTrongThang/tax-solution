@@ -44,7 +44,7 @@ func (s *CrawlerService) EnsureBrowser() error {
 	}
 	l := launcher.New().
 		Leakless(false).
-		Headless(false) // Hiển thị cửa sổ Chrome
+		Headless(true) // Chạy ngầm Chrome không hiện cửa sổ
 
 	// Tự tìm Chrome/Chromium được cài trên máy thay vì hardcode path
 	if chromePath, found := launcher.LookPath(); found {
