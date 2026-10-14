@@ -89,6 +89,9 @@ window.loadPage = async function (pagePath, element) {
                 if (typeof window.initPeriodAndDatePicker === 'function') {
                     window.initPeriodAndDatePicker();
                 }
+                if (typeof window.renderCheckResultOptions === 'function') {
+                    window.renderCheckResultOptions(window._currentInvoiceType || 'ban_ra');
+                }
                 if (typeof window.updateFilterSummaryBadge === 'function') {
                     window.updateFilterSummaryBadge();
                 }
@@ -97,11 +100,11 @@ window.loadPage = async function (pagePath, element) {
         // ------------------------------
 
         if (element) {
-
             document.querySelectorAll('.nav-link').forEach(link => {
-                link.classList.remove('bg-emerald-600/20', 'text-emerald-300', 'border-emerald-500/20');
+                link.classList.remove('bg-emerald-600/20', 'bg-emerald-600/10', 'text-emerald-300', 'border-emerald-500/20');
                 link.classList.add('text-slate-400');
             });
+            element.classList.remove('text-slate-400');
             element.classList.add('bg-emerald-600/20', 'text-emerald-300', 'border-emerald-500/20');
         }
 

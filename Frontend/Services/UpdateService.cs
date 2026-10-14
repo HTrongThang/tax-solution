@@ -40,8 +40,8 @@ namespace Frontend.Services
 
     public static class UpdateService
     {
-        // URL file version.json trên GitHub raw của repository
-        public const string VersionCheckUrl = "https://raw.githubusercontent.com/HTrongThang/tax-solution/main/version.json";
+        // URL file version.json trên GitHub Gist (public, độc lập với repo riêng tư)
+        public const string VersionCheckUrl = "https://gist.githubusercontent.com/HTrongThang/9acd8fd06c46b40e3a99f9eda5a85602/raw/version.json";
 
         /// <summary>
         /// Gửi request kiểm tra phiên bản mới ngầm trên mạng
@@ -84,9 +84,22 @@ namespace Frontend.Services
 
                 result.Success = true;
                 result.LatestVersion = info.LatestVersion.Trim();
-                result.DownloadUrl = string.IsNullOrWhiteSpace(info.DownloadUrl) 
-                    ? "https://github.com/HTrongThang/tax-solution/releases/latest" 
-                    : info.DownloadUrl.Trim();
+                string rawDownloadUrl = info.DownloadUrl?.Trim() ?? "";
+                if (!string.IsNullOrWhiteSpace(rawDownloadUrl))
+                {
+                    // Nếu là đường dẫn cục bộ (D:\...) nhưng không tồn tại trên máy này -> fallback link web
+                    if (!rawDownloadUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                        !rawDownloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+                        !File.Exists(rawDownloadUrl))
+                    {
+                        rawDownloadUrl = "https://github.com/HTrongThang/tax-distribution/releases/latest";
+                    }
+                }
+                else
+                {
+                    rawDownloadUrl = "https://github.com/HTrongThang/tax-distribution/releases/latest";
+                }
+                result.DownloadUrl = rawDownloadUrl;
                 result.ReleaseNotes = info.ReleaseNotes?.Trim() ?? "";
 
                 // So sánh phiên bản
@@ -122,8 +135,13 @@ namespace Frontend.Services
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(downloadUrl))
-                    downloadUrl = "https://github.com/HTrongThang/tax-solution/releases/latest";
+                // Luôn đảm bảo URL hợp lệ trước khi mở trình duyệt
+                if (string.IsNullOrWhiteSpace(downloadUrl) ||
+                    (!downloadUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                     !downloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                {
+                    downloadUrl = "https://github.com/HTrongThang/tax-distribution/releases/latest";
+                }
 
                 Process.Start(new ProcessStartInfo
                 {

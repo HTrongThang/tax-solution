@@ -68,7 +68,6 @@
     // ────────────────────────────────────────────────
     function exportBaoCaoTongHop() {
         try {
-            debugger;
             // 1. Kiểm tra WebView2
             if (!(window.chrome && window.chrome.webview)) {
                 window.showAlert
@@ -135,12 +134,19 @@
                     return;
                 }
 
+                if (action === 'EXPORT_EXCEL_CANCELLED') {
+                    delete window._pendingWebviewRequests[requestId];
+                    console.log('[ExportBCTH] Người dùng đã hủy chọn nơi lưu.');
+                    return;
+                }
+
                 if (action === 'EXPORT_EXCEL_ERROR') {
                     delete window._pendingWebviewRequests[requestId];
                     var msg = payload.message || 'Lỗi không xác định';
                     console.error('[ExportBCTH] ❌ Lỗi:', msg);
-                    // Nếu người dùng hủy → không hiện lỗi đỏ
-                    if (msg.includes('hủy')) {
+                    // Nếu người dùng hủy hoặc payload đánh dấu hủy → không hiện thông báo lỗi
+                    var isCancelled = payload.is_cancelled || msg.toLowerCase().includes('hủy') || msg.includes('há»§y');
+                    if (isCancelled) {
                         console.log('[ExportBCTH] Người dùng hủy xuất.');
                     } else if (window.showAlert) {
                         window.showAlert('Lỗi xuất Excel', msg, 'error');
@@ -211,19 +217,23 @@
                 return;
             }
 
-            // Kiểm tra xem đã có bóc tách dòng hàng chi tiết chưa
+            // Kiểm tra xem đã có bóc tách dòng hàng chi tiết chưa (đã tải chi tiết XML chưa)
             var hasDetails = invoices.some(function (inv) {
                 return (Array.isArray(inv.HoaDons) && inv.HoaDons.length > 0)
                     || (Array.isArray(inv.hoaDons) && inv.hoaDons.length > 0);
             });
 
             if (!hasDetails) {
-                var confirmExport = confirm(
-                    '⚠️ Dữ liệu hiện tại chưa bóc tách file XML (chưa có danh mục từng món hàng).\n\n' +
-                    '👉 Bạn nên bấm nút [📥 Tải chi tiết] để tự động tải XML và bóc tách đầy đủ dòng hàng.\n\n' +
-                    'Bạn có muốn tiếp tục xuất với dữ liệu tổng quan không?'
-                );
-                if (!confirmExport) return;
+                if (typeof window.showAlert === 'function') {
+                    window.showAlert(
+                        'Chưa tải chi tiết hóa đơn',
+                        'Bảng kê chi tiết hàng hóa yêu cầu dữ liệu từng dòng hàng (file XML). Vui lòng bấm nút "Tải chi tiết" trên thanh công cụ trước khi xuất báo cáo!',
+                        'warning'
+                    );
+                } else {
+                    alert('Chưa có dữ liệu chi tiết! Vui lòng bấm nút "Tải chi tiết" trước khi xuất Bảng kê chi tiết hàng hóa.');
+                }
+                return;
             }
 
             // 3. Thu thập thông tin bộ lọc
@@ -261,11 +271,18 @@
                     return;
                 }
 
+                if (action === 'EXPORT_EXCEL_CANCELLED') {
+                    delete window._pendingWebviewRequests[requestId];
+                    console.log('[ExportBKCT] Người dùng đã hủy chọn nơi lưu.');
+                    return;
+                }
+
                 if (action === 'EXPORT_EXCEL_ERROR') {
                     delete window._pendingWebviewRequests[requestId];
                     var msg = payload.message || 'Lỗi không xác định';
                     console.error('[ExportBKCT] ❌ Lỗi:', msg);
-                    if (!msg.includes('hủy') && window.showAlert) {
+                    var isCancelled = payload.is_cancelled || msg.toLowerCase().includes('hủy') || msg.includes('há»§y');
+                    if (!isCancelled && window.showAlert) {
                         window.showAlert('Lỗi xuất Excel', msg, 'error');
                     }
                     return;

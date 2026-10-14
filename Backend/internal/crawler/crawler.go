@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"TAXSOLUTION/internal/logger"
 	"TAXSOLUTION/internal/models"
 	"archive/zip"
 	"context"
@@ -21,13 +22,28 @@ import (
 )
 
 type CrawlerService struct {
-	Browser       *rod.Browser
-	Page          *rod.Page
-	OutputDir     string
-	IsRunning     bool   // Đang chạy hay không
-	CurrentStatus string // Thông báo trạng thái (ví dụ: "Đang tải trang 2...")
-	TotalInvoices int    // Tổng số hóa đơn đã tải được
-	StopRequested bool   // Cờ yêu cầu dừng tiến trình
+	Browser            *rod.Browser
+	Page               *rod.Page
+	OutputDir          string
+	IsRunning          bool   // Đang chạy hay không
+	CurrentStatus      string // Thông báo trạng thái (ví dụ: "Đang tải trang 2...")
+	TotalInvoices      int    // Tổng số hóa đơn đã tải được
+	StopRequested      bool   // Cờ yêu cầu dừng tiến trình
+	CurrentTaxCode     string // Mã số thuế hiện tại
+	CurrentInvoiceType string // Chiều hóa đơn: ban_ra hoặc mua_vao
+	CurrentDateRange   string // Khoảng ngày: vd 01/10/2026-31/10/2026
+}
+
+// logError: Ghi lỗi 1 dòng vào %AppData%\TaxSolution\logs\error.log
+func (c *CrawlerService) logError(step string, err error, detail string) {
+	taxCode := c.CurrentTaxCode
+	invType := c.CurrentInvoiceType
+	dateRange := c.CurrentDateRange
+	errStr := "Unknown error"
+	if err != nil {
+		errStr = err.Error()
+	}
+	logger.LogError(taxCode, invType, dateRange, step, errStr, detail)
 }
 
 // Stop: Gửi tín hiệu dừng tiến trình đang chạy (Search hoặc Crawl)
@@ -44,14 +60,35 @@ func (s *CrawlerService) EnsureBrowser() error {
 	}
 	l := launcher.New().
 		Leakless(false).
-		Headless(true) // Chạy ngầm Chrome không hiện cửa sổ
+		Headless(false) // Chạy ngầm Chrome không hiện cửa sổ
 
-	// Tự tìm Chrome/Chromium được cài trên máy thay vì hardcode path
+	// Tự tìm Chrome/Chromium/Edge được cài trên máy thay vì hardcode 1 đường dẫn duy nhất
+	var browserBin string
 	if chromePath, found := launcher.LookPath(); found {
-		l = l.Bin(chromePath)
-		fmt.Printf("💻 Dùng trình duyệt từ: %s\n", chromePath)
+		browserBin = chromePath
 	} else {
-		fmt.Println("⚠️ Không tìm thấy Chrome tự động, dùng đường dẫn mặc định")
+		candidates := []string{
+			"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+			"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Google\\Chrome\\Application\\chrome.exe"),
+			"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+			"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+		}
+		for _, cand := range candidates {
+			if cand != "" {
+				if _, err := os.Stat(cand); err == nil {
+					browserBin = cand
+					break
+				}
+			}
+		}
+	}
+
+	if browserBin != "" {
+		l = l.Bin(browserBin)
+		fmt.Printf("💻 Dùng trình duyệt từ: %s\n", browserBin)
+	} else {
+		fmt.Println("⚠️ Không tìm thấy Chrome, thử đường dẫn mặc định")
 		l = l.Bin("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
 	}
 	l.Append("--start-maximized")
@@ -285,9 +322,12 @@ func (s *CrawlerService) GetCaptcha() (string, error) {
 }
 func (c *CrawlerService) Login(user, pass, captcha string) error {
 	fmt.Println("🚀 Đang thực hiện đăng nhập (Chế độ kiểm soát nghiêm ngặt)...")
+	c.CurrentTaxCode = strings.TrimSpace(user)
 
 	if c.Page == nil {
-		return fmt.Errorf("TRÌNH DUYỆT CHƯA MỞ: Vui lòng gọi /init trước")
+		err := fmt.Errorf("TRÌNH DUYỆT CHƯA MỞ: Vui lòng gọi /init trước")
+		c.logError("loginTax", err, "Page is nil")
+		return err
 	}
 
 	// --- 1. ĐIỀN THÔNG TIN ---
@@ -341,7 +381,9 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 			if errText != nil && errText.Value.String() != "" {
 				msg := errText.Value.String()
 				fmt.Printf("❌ Thất bại xác thực: %s\n", msg)
-				return parseLoginError(msg)
+				loginErr := parseLoginError(msg)
+				c.logError("loginTax", loginErr, msg)
+				return loginErr
 			}
 		}
 
@@ -360,10 +402,14 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 	}`)
 	if finalErr != nil && finalErr.Value.String() != "" {
 		msg := finalErr.Value.String()
-		return parseLoginError(msg)
+		loginErr := parseLoginError(msg)
+		c.logError("loginTax", loginErr, msg)
+		return loginErr
 	}
 
-	return fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc thông tin đăng nhập không hợp lệ")
+	timeoutErr := fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc thông tin đăng nhập không hợp lệ")
+	c.logError("loginTax", timeoutErr, "Quá thời gian chờ đăng nhập")
+	return timeoutErr
 }
 
 // parseLoginError phân loại chính xác nguyên nhân lỗi đăng nhập trang thuế
@@ -484,15 +530,18 @@ func (c *CrawlerService) switchTab(exactTargetText, fallbackKeyword string, isSu
 	}
 
 	if err != nil {
+		c.logError("switchTab", err, fmt.Sprintf("Lỗi kiểm tra tab [%s]", exactTargetText))
 		fmt.Printf("⚠️ Lỗi kiểm tra tab (%s): %v\n", exactTargetText, err)
 		return err
 	}
 
+	tabNotFoundErr := fmt.Errorf("không tìm thấy tab [%s]", exactTargetText)
+	c.logError("switchTab", tabNotFoundErr, fmt.Sprintf("Fallback keyword: %s", fallbackKeyword))
 	fmt.Printf("⚠️ Không tìm thấy tab [%s]\n", exactTargetText)
 	return nil
 }
 
-func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toDate, invoiceType, category string, stream chan models.StreamData) ([]models.Invoice, error) {
+func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toDate, invoiceType, category, checkResult string, stream chan models.StreamData) ([]models.Invoice, error) {
 	if c.Page == nil {
 		if c.Browser == nil {
 			return nil, fmt.Errorf("browser chưa được khởi tạo")
@@ -505,6 +554,8 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	c.IsRunning = true
 	c.TotalInvoices = 0
 	c.StopRequested = false
+	c.CurrentInvoiceType = invoiceType
+	c.CurrentDateRange = fmt.Sprintf("%s-%s", fromDate, toDate)
 
 	if stream != nil {
 		stream <- models.StreamData{Status: "🚀 Đang khởi động ứng dụng...", IsDone: false}
@@ -522,10 +573,12 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 	// Kiểm tra Page còn valid không
 	if c.Page == nil {
+		errNil := fmt.Errorf("page is nil - trình duyệt chưa sẵn sàng")
+		c.logError("navigation", errNil, "Trình duyệt chưa sẵn sàng")
 		if stream != nil {
 			stream <- models.StreamData{Status: "❌ Trình duyệt chưa sẵn sàng", IsDone: true}
 		}
-		return nil, fmt.Errorf("page is nil - trình duyệt chưa sẵn sàng")
+		return nil, errNil
 	}
 
 	// Kiểm tra xem đã ở trang Tra cứu chưa — nếu rồi thì bỏ qua navigate
@@ -543,6 +596,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 			c.Page.MustWaitIdle()
 		})
 		if navErr != nil {
+			c.logError("navigation", navErr, "Không thể mở trang tra cứu hóa đơn")
 			if stream != nil {
 				stream <- models.StreamData{Status: "❌ Không thể mở trang tra cứu", IsDone: true}
 			}
@@ -575,9 +629,36 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		_ = c.switchTab("Hóa đơn điện tử", "hóa đơn điện tử", true)
 	}
 
+	// --- 1.3. CHỌN KẾT QUẢ KIỂM TRA ---
+	// Luôn chủ động chọn đúng mục trên trang thuế (kể cả "Tất cả"), vì trang thuế có thể đang
+	// ở giá trị khác (vd: "Cục Thuế đã nhận") do lần tra cứu trước hoặc mặc định của hệ thống.
+	// selectCheckResult tự bỏ qua nếu ô đã đúng giá trị mục tiêu.
+	needSelectCheckResult := strings.TrimSpace(checkResult) != ""
+
+	if needSelectCheckResult {
+		labelName := checkResult
+		switch checkResult {
+		case "co_ma":
+			labelName = "Đã cấp mã hóa đơn"
+		case "khong_ma":
+			labelName = "Cục Thuế đã nhận không mã"
+		case "may_tinh_tien":
+			labelName = "Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền"
+		}
+		if stream != nil {
+			stream <- models.StreamData{Status: fmt.Sprintf("🎯 Chọn kết quả kiểm tra: %s...", labelName), IsDone: false}
+		}
+		if errSel := c.selectCheckResult(checkResult); errSel != nil {
+			fmt.Printf("⚠️ Cảnh báo chọn 'Kết quả kiểm tra': %v\n", errSel)
+			if stream != nil {
+				stream <- models.StreamData{Status: fmt.Sprintf("⚠️ Chưa chọn được '%s', tiếp tục tìm kiếm...", labelName), IsDone: false}
+			}
+		}
+	}
+
 	// --- 2. TÌM KIẾM (chọn ngày thông minh: so sánh với anchor hiện tại) ---
 	if stream != nil {
-		stream <- models.StreamData{Status: fmt.Sprintf("📅 Đang chọn khoảng thời gian %s - %s...", fromDate, toDate), IsDone: false}
+		stream <- models.StreamData{Status: fmt.Sprintf("📅 Chọn khoảng thời gian %s - %s...", fromDate, toDate), IsDone: false}
 	}
 	// Đọc ngày hiện tại trên trang thuế (để kiểm tra xem có cần reset anchor không)
 	var curFrom, curTo string
@@ -655,7 +736,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		fmt.Printf("⏩ Ô Đến ngày đã là %s, bỏ qua nhập lại\n", toDate)
 	}
 	if stream != nil {
-		stream <- models.StreamData{Status: "🔍 Đang bấm tìm kiếm...", IsDone: false}
+		stream <- models.StreamData{Status: "🔍 Đang tìm kiếm...", IsDone: false}
 	}
 	time.Sleep(400 * time.Millisecond)
 
@@ -712,8 +793,15 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		return nil, fmt.Errorf("không thể click nút tìm kiếm: %v", err)
 	}
 
-	// Đợi 1.5s để cho website xử lý request → notification kịp xuất hiện
+	// Đợi website thuế xử lý request: chờ spinner xuất hiện rồi biến mất (tối đa 3 phút)
 	time.Sleep(1500 * time.Millisecond)
+	if stream != nil && c.isTaxLoading() {
+		stream <- models.StreamData{Status: "⏳ Đang chờ hệ thống thuế tải dữ liệu...", IsDone: false}
+	}
+	if c.waitTaxIdle(ctx, stream, 180*time.Second) {
+		c.CurrentStatus = "Đã hủy"
+		return allInvoices, fmt.Errorf("thao tác đã bị hủy")
+	}
 	// Kiểm tra lỗi ngay sau click (trước khi bắt đầu vòng poll)
 	if hasErr, errEl, _ := c.Page.Has(".ant-notification-notice-message"); hasErr {
 		var earlyErr string
@@ -741,7 +829,8 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 		// A. Đợi và lấy thông tin tổng số kết quả
 		foundData := false
-		for i := 0; i < 40; i++ {
+		// Vòng chờ tối thiểu 40 lần (~12s); nếu trang thuế vẫn đang tải thì chờ tiếp (tối đa ~3 phút)
+		for i := 0; i < 40 || (i < 600 && c.isTaxLoading()); i++ {
 			if ctx.Err() != nil || c.StopRequested {
 				c.CurrentStatus = "Đã hủy"
 				return allInvoices, fmt.Errorf("thao tác đã bị hủy")
@@ -840,30 +929,42 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 		// B. Cập nhật số trang từ tab đang active
 		if pageIdx == 1 {
-			var pageInfoText string
 			_ = rod.Try(func() {
 				res := c.Page.MustEval(`() => {
 					const panes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'));
 					const activePane = panes[panes.length - 1] || document;
-					const el = activePane.querySelector("div[class*='PageIndex'], .ant-pagination-simple-pager");
-					return el ? el.innerText.trim() : '';
-				}`)
-				pageInfoText = res.Str()
-			})
-			if pageInfoText != "" {
-				parts := strings.Split(pageInfoText, "/")
-				if len(parts) == 2 {
-					total, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
-					if total > 0 {
-						maxPages = total
+
+					// 1. Tìm các nút số trang .ant-pagination-item (1, 2, 3...)
+					const items = Array.from(activePane.querySelectorAll('.ant-pagination-item'));
+					let maxNum = 0;
+					for (const it of items) {
+						const n = parseInt((it.innerText || it.textContent || '').trim());
+						if (!isNaN(n) && n > maxNum) maxNum = n;
 					}
+					if (maxNum > 0) return maxNum;
+
+					// 2. Tìm trong PageIndex dạng 1/2
+					const el = activePane.querySelector("div[class*='PageIndex'], .ant-pagination-simple-pager");
+					if (el) {
+						const parts = (el.innerText || '').split('/');
+						if (parts.length === 2) {
+							const t = parseInt(parts[1].trim());
+							if (!isNaN(t) && t > 0) return t;
+						}
+					}
+					return 1;
+				}`)
+				domPages := res.Int()
+				if domPages > maxPages {
+					maxPages = domPages
+					fmt.Printf("📄 Đọc được số trang từ DOM: %d trang\n", maxPages)
 				}
-			}
+			})
 		}
 
 		// C. Đợi bảng cập nhật (từ trang 2)
 		if pageIdx > 1 {
-			for i := 0; i < 30; i++ {
+			for i := 0; i < 30 || (i < 600 && c.isTaxLoading()); i++ {
 				if ctx.Err() != nil || c.StopRequested {
 					c.CurrentStatus = "Đã hủy"
 					return allInvoices, fmt.Errorf("thao tác đã bị hủy")
@@ -880,6 +981,17 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		var headers []string
 		var rows [][]string
 
+		// Hệ thống thuế chậm: nếu bảng chưa hiển thị dòng nào thì chờ rảnh rồi bóc lại (tối đa 4 lần)
+		for scrapeTry := 0; scrapeTry < 4; scrapeTry++ {
+		headers = nil
+		rows = nil
+		if scrapeTry > 0 {
+			if ctx.Err() != nil || c.StopRequested {
+				break
+			}
+			c.waitTaxIdle(ctx, stream, 45*time.Second)
+			time.Sleep(2 * time.Second)
+		}
 		_ = rod.Try(func() {
 			evalRes := c.Page.MustEval(`() => {
 				const allRows = Array.from(document.querySelectorAll(".ant-table-tbody tr.ant-table-row")).filter(r => !r.closest('.ant-tabs-tabpane-inactive'));
@@ -929,8 +1041,21 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 				rows = append(rows, rowCells)
 			}
 		})
+		if len(rows) > 0 {
+			break
+		}
+		}
 
 		fmt.Printf("📦 Trang %d: bóc được %d dòng hóa đơn (nhận diện %d cột tiêu đề).\n", pageIdx, len(rows), len(headers))
+
+		// Tự động tính số trang từ totalOnTax và số dòng mỗi trang nếu có
+		if pageIdx == 1 && totalOnTax > 0 && len(rows) > 0 {
+			calcPages := (totalOnTax + len(rows) - 1) / len(rows)
+			if calcPages > maxPages {
+				maxPages = calcPages
+				fmt.Printf("📄 Tính toán số trang từ tổng thuế (%d) và pageSize (%d): %d trang\n", totalOnTax, len(rows), maxPages)
+			}
+		}
 
 		for _, cols := range rows {
 			if len(cols) < 5 {
@@ -1174,28 +1299,156 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 
 		// --- 4. CHUYỂN TRANG ---
-		if pageIdx >= maxPages {
+		// Nếu đã thu thập đủ tổng số hóa đơn báo trên trang thuế -> Dừng
+		if totalOnTax > 0 && len(allInvoices) >= totalOnTax {
+			fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn. Dừng chuyển trang!\n", len(allInvoices), totalOnTax)
 			break
 		}
 
-		var nextClicked bool
-		_ = rod.Try(func() {
-			res := c.Page.MustEval(`() => {
-				const panes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'));
-				const activePane = panes[panes.length - 1] || document;
-				const btn = activePane.querySelector(".ant-pagination-next:not(.ant-pagination-disabled) button, button:has(.anticon-right):not([disabled])");
-				if (btn && !btn.disabled) {
-					btn.click();
-					return true;
-				}
-				return false;
-			}`)
-			nextClicked = res.Bool()
-		})
-		if !nextClicked {
+		// Dừng theo vị trí thật "N / M" trên trang thuế (không dùng biến đếm pageIdx vì có thể lệch khi thuế chậm)
+		if curPos, totPos := c.pagerPos(); totPos > 0 {
+			if curPos >= totPos {
+				fmt.Printf("🏁 Đã đến trang cuối %d/%d.\n", curPos, totPos)
+				break
+			}
+		} else if pageIdx >= maxPages {
+			fmt.Printf("🏁 Đã đến trang tối đa %d/%d.\n", pageIdx, maxPages)
 			break
 		}
+
+		// Thử chuyển sang trang tiếp theo (đa chiến lược: Icon Next, ant-pagination-next, Input Simple Pager, Số trang)
+		var nextClicked bool
+		var nextMethod string
+		for attempt := 1; attempt <= 40 && !nextClicked && nextMethod != "last-page"; attempt++ {
+			if attempt > 1 {
+				if ctx.Err() != nil || c.StopRequested {
+					break
+				}
+				// Nút > bị khóa khi thuế đang tải -> chờ rảnh rồi bấm lại
+				c.waitTaxIdle(ctx, stream, 30*time.Second)
+			}
+			forceNext := attempt >= 15
+			_ = rod.Try(func() {
+				res := c.Page.MustEval(`(targetPage, force) => {
+					// 1. Tìm container thuộc tab đang active
+					const activePanes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'))
+						.filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
+					const container = activePanes[activePanes.length - 1] || document;
+
+					const fire = (el) => {
+						if (!el) return false;
+						el.scrollIntoView({ block: 'nearest' });
+						el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+						el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+						el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+						if (typeof el.click === 'function') el.click();
+						return true;
+					};
+
+					// Cách 0 (chính xác nhất): ô "cur / total" (styles__PageIndex) và nút > nằm ngay cột kế bên
+					const idxEl = Array.from(container.querySelectorAll('div')).find(d => d.children.length === 0 && /^\s*\d+\s*\/\s*\d+\s*$/.test(d.textContent || ''));
+					if (idxEl) {
+						const m = idxEl.textContent.match(/(\d+)\s*\/\s*(\d+)/);
+						if (m && parseInt(m[1], 10) >= parseInt(m[2], 10)) return { ok: false, method: 'last-page' };
+						const col = idxEl.closest('.ant-col');
+						const nb = col && col.nextElementSibling ? col.nextElementSibling.querySelector('button') : null;
+						if (nb && nb.querySelector('.anticon-right') && (!nb.disabled || force)) {
+							if (nb.disabled || nb.hasAttribute('disabled')) { nb.removeAttribute('disabled'); nb.disabled = false; nb.style.pointerEvents = 'auto'; }
+							fire(nb);
+							return { ok: true, method: 'pager-next-btn' };
+						}
+					}
+
+					// Cách 1: Nút chứa icon anticon-right (chuẩn Ant Design nút Next trên trang thuế)
+					const rightIcons = Array.from(container.querySelectorAll('i.anticon-right, .anticon-right, [aria-label*="right"]'));
+					for (const icon of rightIcons) {
+						const btn = icon.closest('button, a, li');
+						if (btn && !btn.disabled && !btn.hasAttribute('disabled') && !btn.classList.contains('ant-pagination-disabled') && btn.getAttribute('aria-disabled') !== 'true') {
+							fire(btn);
+							return { ok: true, method: 'icon-right' };
+						}
+					}
+
+					// Cách 2: li.ant-pagination-next
+					const nextLis = Array.from(container.querySelectorAll('.ant-pagination-next, li[title*="Next"], li[title*="trang sau"]'));
+					for (const nextLi of nextLis) {
+						if (nextLi.classList.contains('ant-pagination-disabled') || nextLi.getAttribute('aria-disabled') === 'true') continue;
+						const toClick = nextLi.querySelector('button, a, .ant-pagination-item-link') || nextLi;
+						if (!toClick.disabled && !toClick.hasAttribute('disabled')) {
+							fire(toClick);
+							return { ok: true, method: 'ant-pagination-next' };
+						}
+					}
+
+					// Cách 3: Nhập số trang vào ô input trong simple pager (1/10) hoặc quick jumper rồi Enter
+					const pageInput = container.querySelector('.ant-pagination-simple-pager input, .ant-pagination-options-quick-jumper input, .ant-pagination input');
+					if (pageInput) {
+						pageInput.focus();
+						pageInput.value = targetPage;
+						pageInput.dispatchEvent(new Event('input', { bubbles: true }));
+						pageInput.dispatchEvent(new Event('change', { bubbles: true }));
+						pageInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+						pageInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+						return { ok: true, method: 'simple-pager-input' };
+					}
+
+					// Cách 4: Click vào số trang đích (nếu có thanh số 1, 2, 3...)
+					const numItem = container.querySelector('.ant-pagination-item-' + targetPage + ', li[title="' + targetPage + '"]');
+					if (numItem && !numItem.classList.contains('ant-pagination-item-active')) {
+						fire(numItem.querySelector('a') || numItem);
+						return { ok: true, method: 'numbered-item' };
+					}
+
+					// Cách 5: Tìm kiếm trên toàn document (fallback ngoài container)
+					const docRight = document.querySelector('button i.anticon-right, li.ant-pagination-next:not(.ant-pagination-disabled) a, li.ant-pagination-next:not(.ant-pagination-disabled) button');
+					if (docRight) {
+						const b = docRight.closest('button, a, li');
+						if (b && !b.disabled && !b.classList.contains('ant-pagination-disabled')) {
+							fire(b);
+							return { ok: true, method: 'doc-fallback' };
+						}
+					}
+
+					return { ok: false, method: 'none' };
+				}`, pageIdx+1, forceNext)
+				nextClicked = res.Get("ok").Bool()
+				nextMethod = res.Get("method").Str()
+			})
+			if !nextClicked && nextMethod != "last-page" && attempt < 40 {
+				time.Sleep(3000 * time.Millisecond)
+			}
+		}
+		if !nextClicked {
+			fmt.Printf("🏁 Không còn trang tiếp theo hoặc nút Next bị vô hiệu hóa. Dừng tại trang %d!\n", pageIdx)
+			if totalOnTax > 0 && len(allInvoices) < totalOnTax {
+				c.logError("chuyển trang", fmt.Errorf("dừng sớm ở trang %d", pageIdx), fmt.Sprintf("đã lấy %d/%d hóa đơn, maxPages=%d", len(allInvoices), totalOnTax, maxPages))
+				if stream != nil {
+					stream <- models.StreamData{Status: fmt.Sprintf("⚠️ Chỉ lấy được %d/%d hóa đơn (không chuyển được sang trang %d)", len(allInvoices), totalOnTax, pageIdx+1), IsDone: false}
+				}
+			}
+			break
+		}
+		fmt.Printf("⏭️ Đã bấm sang trang %d (cách: %s)...\n", pageIdx+1, nextMethod)
 		time.Sleep(1500 * time.Millisecond)
+		// Xác nhận ô "N / M" đã đổi sang trang đích (tối đa ~30s), rồi chờ hết loading
+		for w := 0; w < 30; w++ {
+			cur := 0
+			_ = rod.Try(func() {
+				r := c.Page.Timeout(3 * time.Second).MustEval(`() => {
+					const panes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'));
+					const root = panes[panes.length - 1] || document;
+					const el = Array.from(root.querySelectorAll('div')).find(d => d.children.length === 0 && /^\s*\d+\s*\/\s*\d+\s*$/.test(d.textContent || ''));
+					if (!el) return -1;
+					return parseInt(el.textContent.match(/(\d+)/)[1], 10);
+				}`)
+				cur = r.Int()
+			})
+			if cur == -1 || cur == pageIdx+1 {
+				break
+			}
+			time.Sleep(1000 * time.Millisecond)
+		}
+		c.waitTaxIdle(ctx, stream, 60*time.Second)
 	}
 
 	// 5. KẾT THÚC
@@ -1210,6 +1463,53 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	}
 
 	return allInvoices, nil
+}
+
+// isTaxLoading: trả về true nếu trang thuế đang hiển thị trạng thái đang tải
+// (spinner Ant Design / bảng đang loading / nút Tìm kiếm đang loading) ở tab đang hoạt động.
+func (c *CrawlerService) isTaxLoading() bool {
+	loading := false
+	_ = rod.Try(func() {
+		res := c.Page.Timeout(3 * time.Second).MustEval(`() => {
+			const shown = (el) => {
+				if (!el || el.closest('.ant-tabs-tabpane-inactive')) return false;
+				return el.offsetParent !== null || el.getClientRects().length > 0;
+			};
+			const sel = '.ant-spin-spinning, .ant-spin-blur, .ant-table-loading, .ant-btn-loading';
+			return Array.from(document.querySelectorAll(sel)).some(shown);
+		}`)
+		loading = res.Bool()
+	})
+	return loading
+}
+
+// waitTaxIdle: chờ đến khi trang thuế hết trạng thái đang tải (2 lần kiểm tra liên tiếp đều rảnh).
+// Trả về true nếu bị hủy giữa chừng; hết maxWait thì tự thoát để các bước sau xử lý như cũ.
+func (c *CrawlerService) waitTaxIdle(ctx context.Context, stream chan models.StreamData, maxWait time.Duration) bool {
+	start := time.Now()
+	deadline := start.Add(maxWait)
+	lastNotify := start
+	idleCount := 0
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil || c.StopRequested {
+			return true
+		}
+		if c.isTaxLoading() {
+			idleCount = 0
+			// Báo tiến trình định kỳ để giao diện biết vẫn đang chờ thuế (tránh watchdog 90s)
+			if stream != nil && time.Since(lastNotify) >= 10*time.Second {
+				stream <- models.StreamData{Status: fmt.Sprintf("⏳ Hệ thống thuế đang tải dữ liệu... (%d giây)", int(time.Since(start).Seconds())), IsDone: false}
+				lastNotify = time.Now()
+			}
+		} else {
+			idleCount++
+			if idleCount >= 2 {
+				return false
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return false
 }
 
 // Hàm bổ trợ lấy Số hóa đơn đầu tiên trên bảng hiện tại
@@ -1233,14 +1533,23 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) e
 		return fmt.Errorf("định dạng ngày không hợp lệ: %s", dateStr)
 	}
 
-	fmt.Printf("📅 Đang chọn %s cho ô %s...\n", dateStr, selector)
+	fmt.Printf("📅  %s cho ô %s...\n", dateStr, selector)
 
-	// 1. Click ô date picker để mở popup calendar
+	// Dọn dẹp mọi style ẩn bị lưu sai trước đây (nếu có)
+	_ = rod.Try(func() {
+		c.Page.MustEval(`() => {
+			document.querySelectorAll('.ant-select-dropdown').forEach(d => {
+				if (d.style.display === 'none') d.style.removeProperty('display');
+			});
+		}`)
+	})
+
+	// 1. Click ô date picker để mở popup calendar (tìm ô VISIBLE trong active tab)
 	var clickErr error
 	for retry := 0; retry < 3; retry++ {
 		clickErr = rod.Try(func() {
-			els, err := c.Page.Elements(selector)
-			if err == nil && len(els) > 1 {
+			els, err := c.Page.Timeout(3 * time.Second).Elements(selector)
+			if err == nil && len(els) > 0 {
 				for _, el := range els {
 					if vis, errV := el.Visible(); errV == nil && vis {
 						el.MustClick()
@@ -1248,32 +1557,45 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) e
 					}
 				}
 			}
-			el := c.Page.MustElement(selector)
-			el.MustWaitVisible()
+			el := c.Page.Timeout(3 * time.Second).MustElement(selector)
 			el.MustClick()
 		})
 		if clickErr == nil {
 			break
 		}
 		fmt.Printf("⚠️ Retry click ô lịch lần %d: %v\n", retry+1, clickErr)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(400 * time.Millisecond)
 	}
 	if clickErr != nil {
-		return fmt.Errorf("không thể mở ô lịch %s: %v", selector, clickErr)
+		calErr := fmt.Errorf("không thể mở ô lịch %s: %v", selector, clickErr)
+		c.logError("selectDateOnCalendar", calErr, fmt.Sprintf("Selector: %s | Ngày: %s", selector, dateStr))
+		return calErr
 	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
-	// 2. Tìm ô input bên trong popup calendar và gõ ngày
-	err := rod.Try(func() {
-		calInput := c.Page.MustElement(".ant-calendar-input")
-		calInput.MustWaitVisible()
-		calInput.MustSelectAllText().MustInput(dateStr)
-		fmt.Printf("✅ Đã nhập ngày %s vào ô calendar\n", dateStr)
-	})
-	if err != nil {
-		return fmt.Errorf("không thể nhập ngày vào calendar: %v", err)
+	// 2. Tìm ô input bên trong popup calendar và gõ ngày (dùng Timeout để KHÔNG BAO GIỜ BỊ ĐỨNG)
+	var inputErr error
+	for retry := 0; retry < 2; retry++ {
+		inputErr = rod.Try(func() {
+			calInput := c.Page.Timeout(3 * time.Second).MustElement(".ant-calendar-input")
+			calInput.MustWaitVisible()
+			calInput.MustSelectAllText().MustInput(dateStr)
+			fmt.Printf("✅ Đã nhập ngày %s vào ô calendar\n", dateStr)
+		})
+		if inputErr == nil {
+			break
+		}
+		// Nếu chưa thấy ô .ant-calendar-input, thử click lại ô lịch
+		fmt.Printf("⚠️ Chưa thấy popup lịch, click lại ô %s...\n", selector)
+		_ = rod.Try(func() {
+			c.Page.Timeout(2 * time.Second).MustElement(selector).MustClick()
+		})
+		time.Sleep(400 * time.Millisecond)
 	}
-	time.Sleep(500 * time.Millisecond)
+	if inputErr != nil {
+		return fmt.Errorf("không thể nhập ngày vào calendar: %v", inputErr)
+	}
+	time.Sleep(400 * time.Millisecond)
 
 	// 3. Gỡ khóa disabled-cell (bypass giới hạn 30 ngày từ anchor cũ)
 	_ = rod.Try(func() {
@@ -1305,7 +1627,7 @@ func (c *CrawlerService) selectDateOnCalendar(selector string, dateStr string) e
 		fmt.Printf("✅ Đã click chọn ngày %s\n", dayst)
 	})
 
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 	return nil
 }
 
@@ -1382,37 +1704,50 @@ func (c *CrawlerService) CrawlAllPages() {
 	}()
 
 	fmt.Println("🚀 Bắt đầu quy trình cào đa trang...")
-	// Quay về trang 1
+	// BẮT BUỘC quay về trang 1 trước khi tải chi tiết (dù người dùng đang đứng ở trang nào)
 	c.CurrentStatus = "Đang quay về trang đầu tiên..."
 	fmt.Println("⏮️ Đang reset về trang 1 bằng nút mũi tên trái...")
 
-	for i := 0; i < 200; i++ {
+	for guard := 0; guard < 500; guard++ {
 		if c.StopRequested {
 			c.CurrentStatus = "Đã hủy"
 			fmt.Println("🛑 Tiến trình cào đã bị người dùng hủy.")
 			return
 		}
-		prevClicked := false
-		_ = rod.Try(func() {
-			res := c.Page.MustEval(`() => {
-				const activePanes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'))
-					.filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
-				const container = activePanes[activePanes.length - 1] || document;
-				const btn = container.querySelector("button i.anticon-left") ? container.querySelector("button i.anticon-left").closest("button") : null;
-				if (btn && !btn.disabled && !btn.hasAttribute("disabled")) {
-					btn.click();
-					return true;
-				}
-				return false;
-			}`)
-			prevClicked = res.Bool()
-		})
-		if !prevClicked {
-			fmt.Println("✅ Đã về trang 1 hoặc chỉ có 1 trang.")
+		cur, total := c.pagerPos()
+		fmt.Printf("📍 Vị trí phân trang hiện tại: %d/%d\n", cur, total)
+		if total == 0 && guard < 3 {
+			// Chưa đọc được thanh phân trang -> chờ trang ổn định rồi đọc lại trước khi kết luận chỉ có 1 trang
+			c.waitNotLoading(10 * time.Second)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		if total == 0 || cur <= 1 {
+			fmt.Printf("✅ Đã ở trang 1 (%d/%d) hoặc chỉ có 1 trang.\n", cur, total)
 			break
 		}
-		time.Sleep(400 * time.Millisecond)
+		c.CurrentStatus = "Đang chuẩn bị dữ liệu..."
+		if !c.clickPager("left") {
+			// Nút < đang tạm khóa do trang thuế còn loading -> chờ rồi thử lại
+			time.Sleep(1 * time.Second)
+			if c2, _ := c.pagerPos(); c2 == cur {
+				c.waitNotLoading(30 * time.Second)
+				if !c.clickPager("left") {
+					fmt.Printf("⚠️ Không bấm được nút lùi ở trang %d.\n", cur)
+					break
+				}
+			}
+		}
+		c.waitPagerPage(cur-1, 30*time.Second)
+		c.waitNotLoading(60 * time.Second)
 	}
+	if cur, total := c.pagerPos(); total > 0 && cur != 1 {
+		c.CurrentStatus = "Lỗi"
+		c.logError("quay về trang 1", fmt.Errorf("không về được trang 1"), fmt.Sprintf("đang ở trang %d/%d", cur, total))
+		fmt.Printf("❌ Không quay về được trang 1 (đang ở %d/%d). Hủy tải để tránh thiếu dữ liệu!\n", cur, total)
+		return
+	}
+	c.waitNotLoading(60 * time.Second)
 	time.Sleep(1 * time.Second)
 
 	for page := 1; ; page++ {
@@ -1471,41 +1806,190 @@ func (c *CrawlerService) CrawlAllPages() {
 			c.CurrentStatus = fmt.Sprintf("Trang %d: Đang tải dòng %d/%d", page, i+1, len(rows))
 			fmt.Printf("   🔍 %s...\n", c.CurrentStatus)
 
-			err := c.ProcessDownloadInvoice(row, i)
+			// Hệ thống thuế hay chậm/lỗi: thử lại tối đa 3 lần, mỗi lần chờ trang thuế rảnh rồi mới tải
+			var err error
+			for attempt := 1; attempt <= 3; attempt++ {
+				if c.StopRequested {
+					err = fmt.Errorf("tiến trình đã bị người dùng dừng")
+					break
+				}
+				c.waitNotLoading(45 * time.Second)
+				err = c.ProcessDownloadInvoice(row, i)
+				if err == nil {
+					break
+				}
+				fmt.Printf("   ⚠️ Dòng %d lỗi (lần %d/3): %v\n", i+1, attempt, err)
+				if attempt < 3 {
+					c.CurrentStatus = fmt.Sprintf("Hệ thống thuế phản hồi chậm, đang thử lại (%d/3)...", attempt+1)
+					time.Sleep(3 * time.Second)
+				}
+			}
 			if err != nil {
-				fmt.Printf("   ❌ Lỗi tại dòng %d: %v\n", i+1, err)
-				continue // Lỗi dòng này thì bỏ qua làm dòng tiếp theo
+				fmt.Printf("   ❌ Lỗi tại dòng %d sau 3 lần thử: %v\n", i+1, err)
+				c.logError("tải chi tiết hóa đơn", err, fmt.Sprintf("trang %d, dòng %d/%d", page, i+1, len(rows)))
+				continue // Bỏ qua dòng này, làm dòng tiếp theo
 			}
 
 			// Tải xong 1 dòng thì tăng biến đếm tổng
 			c.TotalInvoices++
 		}
 
-		// Kiểm tra nút sang trang trong tab đang active
-		hasNext := false
-		_ = rod.Try(func() {
-			res := c.Page.MustEval(`() => {
-				const activePanes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active'))
-					.filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
-				const container = activePanes[activePanes.length - 1] || document;
-				const btn = container.querySelector("button i.anticon-right") ? container.querySelector("button i.anticon-right").closest("button") : null;
-				if (btn && !btn.disabled && !btn.hasAttribute("disabled")) {
-					btn.click();
-					return true;
-				}
-				return false;
-			}`)
-			hasNext = res.Bool()
-		})
-
-		if !hasNext {
-			fmt.Printf("🏁 Đã cào xong trang cuối cùng (Trang %d). Dừng lại!\n", page)
+		// Chuyển sang trang kế tiếp bằng nút > cạnh ô "N / M"
+		cur, total := c.pagerPos()
+		if total > 0 && cur >= total {
+			fmt.Printf("🏁 Đã cào xong trang cuối cùng (Trang %d/%d). Dừng lại!\n", cur, total)
 			break
 		}
+		if !c.goNextPage(cur, total) {
+			if c.StopRequested {
+				break
+			}
+			fmt.Printf("⚠️ Không chuyển được sang trang %d (nút > của thuế không phản hồi). Dừng để tránh tải trùng!\n", cur+1)
+			c.logError("chuyển trang tải chi tiết", fmt.Errorf("không chuyển được sang trang %d", cur+1), fmt.Sprintf("đang ở trang %d/%d, nút > bị khóa", cur, total))
+			break
+		}
+		fmt.Println("⏭️ Đã chuyển sang trang tiếp theo...")
+		c.waitNotLoading(60 * time.Second)
+		time.Sleep(1 * time.Second)
+	}
+}
 
-		fmt.Println("⏭️ Chuyển sang trang tiếp theo...")
-		// Đợi 3 giây để dữ liệu trang mới kịp thay đổi
-		time.Sleep(3 * time.Second)
+// pagerPos đọc ô "cur / total" của thanh phân trang trên tab đang active. Không có thanh phân trang -> (0,0).
+func (c *CrawlerService) pagerPos() (cur, total int) {
+	err := rod.Try(func() {
+		res := c.Page.Timeout(5 * time.Second).MustEval(`() => {
+			const shown = (el) => !el.closest('.ant-tabs-tabpane-inactive') && (el.offsetParent !== null || el.getClientRects().length > 0);
+			const el = Array.from(document.querySelectorAll('div')).find(d => d.children.length === 0 && /^\s*\d+\s*\/\s*\d+\s*$/.test(d.textContent || '') && shown(d));
+			if (!el) return '0/0';
+			const m = el.textContent.match(/(\d+)\s*\/\s*(\d+)/);
+			return m[1] + '/' + m[2];
+		}`)
+		fmt.Sscanf(res.Str(), "%d/%d", &cur, &total)
+	})
+	if err != nil {
+		fmt.Printf("⚠️ pagerPos lỗi: %v\n", err)
+	}
+	return
+}
+
+// clickPager bấm nút < (dir="left") hoặc > (dir="right") nằm cạnh ô "N / M". Trả về true nếu đã bấm.
+func (c *CrawlerService) clickPager(dir string) bool {
+	return c.clickPagerOpt(dir, false)
+}
+
+// clickPagerOpt như clickPager; force=true sẽ gỡ thuộc tính disabled (nút bị thuế khóa kẹt) trước khi bấm.
+func (c *CrawlerService) clickPagerOpt(dir string, force bool) bool {
+	clicked := false
+	err := rod.Try(func() {
+		res := c.Page.Timeout(5*time.Second).MustEval(`(dir, force) => {
+			const shown = (el) => !el.closest('.ant-tabs-tabpane-inactive') && (el.offsetParent !== null || el.getClientRects().length > 0);
+			let btn = null;
+			const el = Array.from(document.querySelectorAll('div')).find(d => d.children.length === 0 && /^\s*\d+\s*\/\s*\d+\s*$/.test(d.textContent || '') && shown(d));
+			if (el) {
+				const col = el.closest('.ant-col');
+				const sib = col ? (dir === 'left' ? col.previousElementSibling : col.nextElementSibling) : null;
+				btn = sib ? sib.querySelector('button') : null;
+				if (btn && !btn.querySelector('.anticon-' + dir)) btn = null;
+			}
+			if (!btn) {
+				const ic = Array.from(document.querySelectorAll('button i.anticon-' + dir)).find(shown);
+				btn = ic ? ic.closest('button') : null;
+			}
+			if (!btn) return false;
+			if (btn.disabled || btn.hasAttribute('disabled')) {
+				if (!force) return false;
+				btn.removeAttribute('disabled');
+				btn.disabled = false;
+				btn.style.pointerEvents = 'auto';
+			}
+			btn.scrollIntoView({ block: 'nearest' });
+			btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+			btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+			btn.click();
+			return true;
+		}`, dir, force)
+		clicked = res.Bool()
+	})
+	if err != nil {
+		fmt.Printf("⚠️ clickPager(%s) lỗi: %v\n", dir, err)
+	}
+	return clicked
+}
+
+// unstickPager đóng các popup/overlay có thể đang giữ trang thuế ở trạng thái khóa nút chuyển trang.
+func (c *CrawlerService) unstickPager() {
+	_ = rod.Try(func() {
+		c.Page.Timeout(5 * time.Second).MustEval(`() => {
+			document.querySelectorAll('.ant-modal-close, .ant-message-notice, .ant-notification-notice-close').forEach(b => { try { b.click(); } catch (e) {} });
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+			document.body.click();
+		}`)
+	})
+}
+
+// goNextPage chuyển sang trang cur+1. Nút > của thuế hay bị khóa tạm thời khi hệ thống chậm nên sẽ:
+// chờ trang rảnh → bấm thử → sau 20s dọn overlay → sau 40s ép gỡ khóa nút. Tối đa 150s.
+func (c *CrawlerService) goNextPage(cur, total int) bool {
+	start := time.Now()
+	deadline := start.Add(150 * time.Second)
+	for attempt := 0; time.Now().Before(deadline); attempt++ {
+		if c.StopRequested {
+			return false
+		}
+		// Đã sang trang mới (ví dụ lần bấm trước phản hồi muộn) -> không bấm thêm để tránh nhảy cóc trang
+		if now, _ := c.pagerPos(); now >= cur+1 {
+			return true
+		}
+		c.waitNotLoading(30 * time.Second)
+		elapsed := time.Since(start)
+		if elapsed > 20*time.Second && attempt%3 == 0 {
+			c.unstickPager()
+		}
+		force := elapsed > 40*time.Second
+		if c.clickPagerOpt("right", force) {
+			if force {
+				fmt.Println("⚠️ Nút > của thuế bị khóa, đã ép gỡ khóa và bấm.")
+			}
+			if c.waitPagerPage(cur+1, 25*time.Second) {
+				return true
+			}
+			continue
+		}
+		c.CurrentStatus = "Hệ thống thuế phản hồi chậm, đang chờ chuyển trang..."
+		time.Sleep(2 * time.Second)
+	}
+	return false
+}
+
+// waitPagerPage chờ ô "N / M" hiển thị đúng trang target (tối đa maxWait).
+func (c *CrawlerService) waitPagerPage(target int, maxWait time.Duration) bool {
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		if c.StopRequested {
+			return false
+		}
+		if cur, _ := c.pagerPos(); cur == target {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
+}
+
+// waitNotLoading chờ trang thuế hết trạng thái loading (2 lần kiểm tra liên tiếp).
+func (c *CrawlerService) waitNotLoading(maxWait time.Duration) {
+	deadline := time.Now().Add(maxWait)
+	idle := 0
+	for time.Now().Before(deadline) && !c.StopRequested {
+		if c.isTaxLoading() {
+			idle = 0
+		} else {
+			idle++
+			if idle >= 2 {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
@@ -1599,6 +2083,15 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 		return fmt.Errorf("không tìm thấy nút tải file")
 	}
 
+	// Xóa zip cũ còn sót để không nhặt nhầm file của lần thử trước
+	if staleFiles, errStale := os.ReadDir(c.getDownloadTempDir()); errStale == nil {
+		for _, sf := range staleFiles {
+			if !sf.IsDir() && strings.HasSuffix(sf.Name(), ".zip") {
+				_ = os.Remove(filepath.Join(c.getDownloadTempDir(), sf.Name()))
+			}
+		}
+	}
+
 	// Click nút tải bằng JS event để tránh lỗi pointer-events hoặc overlay
 	_ = rod.Try(func() {
 		btnDownload.MustEval(`() => {
@@ -1651,8 +2144,8 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 
 	var latestZip string
 
-	// Thay vì Sleep 5s, ta check mỗi 500ms (tổng 10s timeout)
-	err := c.retry(20, 500*time.Millisecond, func() bool {
+	// Check mỗi 500ms, chờ tối đa 30s vì hệ thống thuế có lúc phản hồi rất chậm
+	err := c.retry(60, 500*time.Millisecond, func() bool {
 		path, errFile := GetLatestFile(downloadDir)
 		// Điều kiện 1: Không có lỗi khi lấy file
 		// Điều kiện 2: File phải có đuôi .zip (tránh lấy nhầm file .tmp của Chrome)
@@ -1668,16 +2161,18 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	})
 
 	if err != nil {
-		return fmt.Errorf("❌ Không tìm thấy file Zip hợp lệ sau 10 giây chờ đợi")
+		return fmt.Errorf("❌ Không tìm thấy file Zip hợp lệ sau 30 giây chờ đợi")
 	}
 
 	// Dùng c.OutputDir đã khởi tạo từ đầu
 	err = c.ExtractAndMove(latestZip, c.OutputDir, fileName)
 
-	if err == nil {
-		fmt.Printf("   ✅ Đã lưu vào: %s\n", c.OutputDir)
-		os.Remove(latestZip)
+	if err != nil {
+		return fmt.Errorf("không giải nén được file hóa đơn: %v", err)
 	}
+
+	fmt.Printf("   ✅ Đã lưu vào: %s\n", c.OutputDir)
+	os.Remove(latestZip)
 
 	return nil
 }
@@ -1864,4 +2359,179 @@ func formatMoney(val float64) string {
 		res = append(res, s[i:i+3]...)
 	}
 	return string(res)
+}
+
+// selectCheckResult: Chọn mục trong dropdown "Kết quả kiểm tra (*)" trên trang thuế
+func (c *CrawlerService) selectCheckResult(checkResult string) error {
+	if c.Page == nil {
+		return fmt.Errorf("page is nil")
+	}
+
+	target := strings.TrimSpace(checkResult)
+	if target == "" {
+		return nil
+	}
+
+	// Map legacy keys if passed
+	switch target {
+	case "co_ma":
+		target = "Đã cấp mã hóa đơn"
+	case "khong_ma":
+		target = "Cục Thuế đã nhận không mã"
+	case "may_tinh_tien":
+		target = "Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền"
+	case "tat_ca", "tat ca", "all":
+		target = "Tất cả"
+	}
+
+	fmt.Printf("🔍 Bắt đầu chọn 'Kết quả kiểm tra' mục tiêu: [%s]\n", target)
+
+	var selectErr error
+	rodErr := rod.Try(func() {
+		page := c.Page.Timeout(15 * time.Second)
+
+		res, err := page.Eval(`async (target) => {
+			// Dọn dẹp inline style display nếu có
+			document.querySelectorAll('.ant-select-dropdown').forEach(d => {
+				d.style.removeProperty('display');
+				d.style.removeProperty('visibility');
+			});
+
+			const normTarget = target.trim().toLowerCase();
+
+			// Tìm ô #ttxly thuộc tab đang ACTIVE (bỏ qua tab ẩn)
+			const allBoxes = Array.from(document.querySelectorAll('#ttxly, [id*="ttxly"]'));
+			let activeBox = allBoxes.find(b => {
+				if (b.closest('.ant-tabs-tabpane-inactive')) return false;
+				const r = b.getBoundingClientRect();
+				return r.width > 0 && r.height > 0;
+			});
+			if (!activeBox) {
+				activeBox = allBoxes.find(b => !b.closest('.ant-tabs-tabpane-inactive')) || allBoxes[0];
+			}
+			if (!activeBox) return { ok: false, msg: 'Không tìm thấy ô combobox #ttxly' };
+
+			const valEl = activeBox.querySelector('.ant-select-selection-selected-value') || activeBox;
+			const curVal = (valEl.getAttribute('title') || valEl.innerText || '').trim();
+
+			// Nếu đã đúng giá trị mục tiêu thì hoàn thành ngay không cần click
+			if (curVal.toLowerCase() === normTarget) {
+				return { ok: true, already: true, val: curVal };
+			}
+
+			const combo = activeBox.querySelector('.ant-select-selection') || activeBox.querySelector('[role="combobox"]') || activeBox;
+			combo.scrollIntoView({ block: 'nearest' });
+			combo.focus();
+			['mousedown', 'mouseup', 'click'].forEach(evt => {
+				combo.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+			});
+			if (typeof combo.click === 'function') combo.click();
+
+			const arrow = activeBox.querySelector('.ant-select-arrow');
+			if (arrow) {
+				arrow.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+			}
+
+			// Tìm dropdown popup
+			const ctrlId = combo.getAttribute('aria-controls');
+			let matched = null;
+
+			for (let i = 0; i < 20; i++) {
+				let items = [];
+				if (ctrlId) {
+					const root = document.getElementById(ctrlId);
+					if (root) items = Array.from(root.querySelectorAll('li'));
+				}
+				if (items.length === 0) {
+					const openDropdowns = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'));
+					for (const dd of openDropdowns) {
+						const list = Array.from(dd.querySelectorAll('li'));
+						if (list.length > 0) {
+							items = list;
+							break;
+						}
+					}
+				}
+				if (items.length === 0) {
+					items = Array.from(document.querySelectorAll('li[role="option"]')).filter(li => {
+						const r = li.getBoundingClientRect();
+						return r.width > 0 && r.height > 0;
+					});
+				}
+
+				if (items.length > 0) {
+					matched = items.find(li => (li.innerText || li.textContent || '').trim().toLowerCase() === normTarget);
+					if (!matched) {
+						matched = items.find(li => (li.innerText || li.textContent || '').trim().toLowerCase().includes(normTarget));
+					}
+					if (matched) break;
+				}
+
+				if (i === 3 || i === 8) {
+					if (arrow) arrow.click();
+					combo.focus();
+					combo.click();
+					combo.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true }));
+				}
+
+				await new Promise(r => setTimeout(r, 60));
+			}
+
+			if (!matched) {
+				return { 
+					ok: false, 
+					msg: 'Không tìm thấy option [' + target + ']', 
+					curVal: curVal 
+				};
+			}
+
+			// Kích hoạt sự kiện chuột lên option
+			matched.scrollIntoView({ block: 'nearest' });
+			['mouseenter', 'mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+				matched.dispatchEvent(new MouseEvent(evt, {
+					bubbles: true,
+					cancelable: true,
+					view: window,
+					button: 0,
+					buttons: 1
+				}));
+			});
+
+			await new Promise(r => setTimeout(r, 100));
+			if (document.activeElement) document.activeElement.blur();
+
+			const finalVal = (valEl.getAttribute('title') || valEl.innerText || '').trim();
+			return { ok: true, val: finalVal };
+		}`, target)
+
+		if err != nil {
+			selectErr = fmt.Errorf("lỗi eval JS: %w", err)
+			fmt.Printf("❌ Lỗi eval khi chọn 'Kết quả kiểm tra' [%s]: %v\n", target, err)
+			return
+		}
+
+		if res != nil {
+			ok := res.Value.Get("ok").Bool()
+			val := res.Value.Get("val").Str()
+			if ok {
+				fmt.Printf("🎯 'Kết quả kiểm tra' sau khi chọn: [%s] (Mục tiêu: [%s])\n", val, target)
+			} else {
+				msg := res.Value.Get("msg").Str()
+				selectErr = fmt.Errorf("%s", msg)
+				fmt.Printf("❌ Thất bại khi chọn 'Kết quả kiểm tra' [%s]: %s\n", target, msg)
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	})
+
+	if rodErr != nil && selectErr == nil {
+		selectErr = fmt.Errorf("lỗi rod runtime: %w", rodErr)
+		fmt.Printf("❌ Lỗi rod khi chọn 'Kết quả kiểm tra' [%s]: %v\n", target, rodErr)
+	}
+
+	if selectErr != nil {
+		c.logError("selectCheckResult", selectErr, fmt.Sprintf("Mục tiêu: %s", target))
+	}
+
+	return selectErr
 }

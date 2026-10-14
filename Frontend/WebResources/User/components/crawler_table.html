@@ -5,9 +5,12 @@
         class="bg-white border border-slate-200 rounded-2xl shadow-sm px-4 py-2.5 flex items-center justify-between gap-3">
         <!-- Bên trái: Công ty, Đăng nhập & Nút Tìm kiếm (mở Dialog) -->
         <div class="flex items-center gap-2.5 flex-1 min-w-0">
-            <div
-                class="bg-gradient-to-br from-slate-800 to-slate-900 p-2 rounded-xl text-white text-sm shadow-md flex-shrink-0">
-                🏢</div>
+            <div class="bg-slate-100 p-2 rounded-xl text-slate-600 shadow-xs flex-shrink-0">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+            </div>
             <select id="select-company"
                 class="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer hover:text-emerald-600 transition-colors truncate max-w-[260px]">
                 <option value="">Đang tải danh sách...</option>
@@ -22,7 +25,10 @@
             <!-- Nút Bộ lọc tra cứu mở Dialog -->
             <button id="btn-open-search" onclick="window.openSearchDialog()"
                 class="bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-600 hover:text-white px-3.5 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-xs active:scale-95 flex-shrink-0 cursor-pointer">
-                <span>🔍</span>
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
                 <span>Bộ lọc tra cứu</span>
             </button>
         </div>
@@ -32,12 +38,19 @@
             <!-- Nút Tải chi tiết -->
             <button id="btn-download-detail" onclick="handleDownloadDetail()" disabled
                 class="px-2.5 py-1.5 text-[10px] font-bold text-slate-500 hover:bg-emerald-50 hover:text-emerald-600 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-500 cursor-pointer">
-                <span class="text-sm">🗂️</span> Tải chi tiết
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Tải chi tiết</span>
             </button>
             <!-- Nút Dừng (ẩn mặc định) -->
             <button id="btn-stop-download" onclick="handleStopDownload()" style="display:none"
                 class="px-2.5 py-1.5 text-[10px] font-bold text-rose-500 bg-rose-50 hover:bg-rose-100 hover:text-rose-700 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer active:scale-95">
-                <span class="text-sm">⏹</span> Dừng
+                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="5" y="5" width="14" height="14" rx="2" />
+                </svg>
+                <span>Dừng</span>
             </button>
             <!-- Đồng hồ đếm thời gian -->
             <span id="download-timer" class="text-[10px] font-mono font-bold text-slate-400 tabular-nums"
@@ -49,16 +62,28 @@
 
             <button id="btn-export-xml" onclick="handleExportXml(this)" disabled
                 class="px-2.5 py-1.5 text-[10px] font-bold text-slate-500 hover:bg-slate-100 hover:text-blue-600 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-500 cursor-pointer">
-                <span class="text-sm">📄</span> XML-HTML
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span>XML-HTML</span>
             </button>
             <button id="btn-export-pdf" disabled
                 class="px-2.5 py-1.5 text-[10px] font-bold text-slate-400 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
-                <span class="text-sm">📕</span> PDF
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                <span>PDF</span>
             </button>
             <div class="relative" id="excel-dropdown-wrapper">
                 <button id="btn-export-excel" onclick="toggleExcelDropdown()" disabled
                     class="px-2.5 py-1.5 text-[10px] font-bold text-slate-500 hover:bg-slate-100 hover:text-green-600 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-slate-500 cursor-pointer">
-                    <span class="text-sm">📗</span> EXCEL
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <span>EXCEL</span>
                     <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7">
                         </path>
@@ -73,7 +98,11 @@
                     <div class="py-1">
                         <button onclick="exportBaoCaoTongHop(); closeExcelDropdown()"
                             class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors flex items-center gap-2.5 cursor-pointer">
-                            <span class="text-base">📊</span>
+                            <svg class="w-4 h-4 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
                             <div>
                                 <div class="font-bold text-[11px]">Báo cáo tổng hợp</div>
                                 <div class="text-[10px] text-slate-400 font-normal">Danh sách hóa đơn 17 cột</div>
@@ -81,7 +110,11 @@
                         </button>
                         <button onclick="exportBangKeChiTiet(); closeExcelDropdown()"
                             class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition-colors flex items-center gap-2.5 cursor-pointer">
-                            <span class="text-base">📋</span>
+                            <svg class="w-4 h-4 text-teal-600 flex-shrink-0" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            </svg>
                             <div>
                                 <div class="font-bold text-[11px]">Bảng kê chi tiết hàng hóa</div>
                                 <div class="text-[10px] text-slate-400 font-normal">Chi tiết từng dòng HHDVu 16 cột
@@ -90,7 +123,11 @@
                         </button>
                         <button disabled
                             class="w-full text-left px-3.5 py-2.5 text-xs font-semibold text-slate-400 flex items-center gap-2.5 cursor-not-allowed opacity-50">
-                            <span class="text-base">🧾</span>
+                            <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor"
+                                viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2zM10 8.5a.5.5 0 11-1 0 .5.5 0 011 0zm5 5a.5.5 0 11-1 0 .5.5 0 011 0z" />
+                            </svg>
                             <div>
                                 <div class="font-bold text-[11px]">Bảng kê khai thuế GTGT</div>
                                 <div class="text-[10px] text-slate-300 font-normal">Sắp ra mắt</div>
@@ -101,9 +138,27 @@
             </div>
             <button disabled
                 class="px-2.5 py-1.5 text-[10px] font-bold text-slate-400 rounded-lg transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
-                <span class="text-sm">⚖️</span> ĐỐI CHIẾU
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
+                </svg>
+                <span>ĐỐI CHIẾU</span>
             </button>
         </div>
+    </div>
+
+    <!-- Thông báo lưu ý hệ thống Thuế -->
+    <div
+        class="bg-amber-50/80 border border-amber-200/70 rounded-xl px-4 py-2 flex items-center gap-2.5 text-amber-800 text-xs shadow-xs">
+        <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span class="leading-relaxed">
+            <strong class="font-semibold text-amber-900">Lưu ý:</strong> Cổng thông tin Thuế có thể bị lỗi hoặc gián
+            đoạn. Khi thao tác nếu hệ thống có dừng, vui lòng tắt khởi động lại ứng dụng hoặc truy cập trang Thuế để
+            kiểm tra.
+        </span>
     </div>
 
     <!-- Data Table Card -->
@@ -145,7 +200,7 @@
     <div class="bg-white rounded-2xl shadow-2xl w-[380px] border border-slate-200 overflow-hidden">
         <!-- Modal Header -->
         <div class="bg-gradient-to-r from-slate-800 to-slate-900 px-6 py-4">
-            <h3 class="text-white font-bold text-center uppercase text-xs tracking-widest">🔐 Xác thực Captcha</h3>
+            <h3 class="text-white font-bold text-center uppercase text-xs tracking-widest">Xác thực Captcha</h3>
         </div>
         <div class="p-6 space-y-5">
             <div class="bg-slate-50 rounded-xl p-3 flex items-center justify-center gap-3 border border-slate-200">
@@ -192,8 +247,11 @@
         <div class="flex items-center justify-between px-6 pt-5 pb-3">
             <div class="flex items-center gap-2.5">
                 <div
-                    class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg font-bold shadow-xs">
-                    🔍
+                    class="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-xs">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
                 </div>
                 <div>
                     <h3 class="text-sm font-extrabold text-slate-900 leading-tight">Tra cứu hóa đơn điện tử</h3>
@@ -213,7 +271,10 @@
         <div class="px-6 py-4 space-y-4">
             <!-- Active Company Preview -->
             <div class="bg-slate-50 border border-slate-200/80 rounded-xl px-3.5 py-2.5 flex items-center gap-2.5">
-                <span class="text-base">🏢</span>
+                <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
                 <div class="min-w-0 flex-1">
                     <div class="text-[10px] font-bold uppercase text-slate-400">Công ty tra cứu</div>
                     <div id="search-modal-company-name" class="text-xs font-bold text-slate-800 truncate">---</div>
@@ -228,12 +289,10 @@
                 <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
                     <button type="button" id="tab-invoice-ban-ra" onclick="window.setInvoiceType('ban_ra')"
                         class="py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 bg-white text-emerald-700 shadow-xs cursor-pointer">
-                        <span>📤</span>
                         <span>Hóa đơn bán ra</span>
                     </button>
                     <button type="button" id="tab-invoice-mua-vao" onclick="window.setInvoiceType('mua_vao')"
                         class="py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-800 cursor-pointer">
-                        <span>📥</span>
                         <span>Hóa đơn mua vào</span>
                     </button>
                 </div>
@@ -247,15 +306,41 @@
                 <div class="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl">
                     <button type="button" id="tab-cat-dien-tu" onclick="window.setInvoiceCategory('dien_tu')"
                         class="py-2 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 bg-white text-emerald-700 shadow-xs cursor-pointer">
-                        <span>⚡</span>
                         <span>Hóa đơn điện tử</span>
                     </button>
                     <button type="button" id="tab-cat-may-tinh-tien"
                         onclick="window.setInvoiceCategory('may_tinh_tien')"
                         class="py-2 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-800 cursor-pointer">
-                        <span>🖩</span>
                         <span>Từ máy tính tiền</span>
                     </button>
+                </div>
+            </div>
+
+            <!-- 3. Kết quả kiểm tra (*) -->
+            <div id="wrapper-check-result">
+                <label
+                    class="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                    <span>Kết quả kiểm tra</span>
+                    <span class="text-[10px] text-rose-500 font-bold">(*)</span>
+                </label>
+                <div class="relative">
+                    <select id="select-check-result" onchange="window.handleCheckResultChange(this.value)"
+                        class="w-full bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer">
+                        <option value="Tất cả" selected>Tất cả</option>
+                        <option value="Cục Thuế đã nhận">Cục Thuế đã nhận</option>
+                        <option value="Đang tiến hành kiểm tra điều kiện cấp mã">Đang tiến hành kiểm tra điều kiện cấp
+                            mã</option>
+                        <option value="CQT từ chối hóa đơn theo từng lần phát sinh">CQT từ chối hóa đơn theo từng lần
+                            phát sinh</option>
+                        <option value="Hóa đơn đủ điều kiện cấp mã">Hóa đơn đủ điều kiện cấp mã</option>
+                        <option value="Hóa đơn không đủ điều kiện cấp mã">Hóa đơn không đủ điều kiện cấp mã</option>
+                        <option value="Đã cấp mã hóa đơn">Đã cấp mã hóa đơn</option>
+                        <option value="Cục Thuế đã nhận không mã">Cục Thuế đã nhận không mã</option>
+                        <option value="Đã kiểm tra định kỳ HĐĐT không có mã">Đã kiểm tra định kỳ HĐĐT không có mã
+                        </option>
+                        <option value="Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền">Cục Thuế đã nhận hóa
+                            đơn có mã khởi tạo từ máy tính tiền</option>
+                    </select>
                 </div>
             </div>
 
@@ -295,8 +380,13 @@
                             class="w-full bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono font-semibold text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer">
                     </div>
                 </div>
-                <p class="text-[10px] text-slate-400 mt-2 flex items-center gap-1">
-                    <span>💡</span> Giới hạn tra cứu tối đa 1 Quý (không quá 93 ngày)
+                <p class="text-[10px] text-slate-400 mt-2 flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor"
+                        viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Giới hạn tra cứu tối đa 1 Quý (không quá 93 ngày)</span>
                 </p>
             </div>
         </div>
@@ -309,7 +399,10 @@
             </button>
             <button id="btn-search" type="button" onclick="window.handleSearchFromDialog()"
                 class="bg-slate-900 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-2 cursor-pointer">
-                <span>🔍</span>
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
                 <span>Bắt đầu tìm kiếm</span>
             </button>
         </div>
@@ -343,14 +436,27 @@
                 </svg>
                 <div id="cpd-icon-done" style="display:none; position:absolute; inset:0;
                      align-items:center; justify-content:center;
-                     background:#ecfdf5; border-radius:50%; font-size:24px;">✅</div>
+                     background:#ecfdf5; border-radius:50%; color:#059669;">
+                    <svg style="width:24px; height:24px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                    </svg>
+                </div>
                 <div id="cpd-icon-error" style="display:none; position:absolute; inset:0;
                      align-items:center; justify-content:center;
-                     background:#fef2f2; border-radius:50%; font-size:24px;">❌</div>
+                     background:#fef2f2; border-radius:50%; color:#dc2626;">
+                    <svg style="width:24px; height:24px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                            d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </div>
             </div>
-            <div>
-                <div id="cpd-title" style="font-size:1rem; font-weight:800; color:#0f172a; letter-spacing:-0.01em;">
-                    Đang tải hóa đơn...</div>
+            <div style="flex:1;">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <div id="cpd-title" style="font-size:1rem; font-weight:800; color:#0f172a; letter-spacing:-0.01em;">
+                        Đang tải hóa đơn...</div>
+                    <span id="cpd-timer-badge"
+                        style="display:none; font-family:monospace; font-size:0.75rem; font-weight:700; color:#059669; background:#ecfdf5; padding:2px 8px; border-radius:999px; border:1px solid #a7f3d0;">00:00</span>
+                </div>
                 <div id="cpd-subtitle" style="font-size:0.7rem; color:#94a3b8; margin-top:2px;">
                     Vui lòng không đóng cửa sổ</div>
             </div>
@@ -389,7 +495,7 @@
                     border:1px solid #e2e8f0; margin-bottom:12px;">
             <div style="font-size:0.6rem; color:#94a3b8; font-weight:600;
                         text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">
-                📁 Thư mục lưu</div>
+                Thư mục lưu:</div>
             <div id="cpd-folder" style="font-size:0.7rem; color:#475569; font-weight:500;
                         word-break:break-all; line-height:1.4;"></div>
         </div>
@@ -408,8 +514,8 @@
 
         <!-- Footer -->
         <div style="text-align:center;">
-            <span style="font-size:0.65rem; color:#cbd5e1;">
-                ⚡ Hệ thống đang tự động xử lý — kết quả sẽ lưu vào thư mục đã chọn
+            <span style="font-size:0.65rem; color:#94a3b8;">
+                Hệ thống đang tự động tải và đồng bộ dữ liệu hóa đơn
             </span>
         </div>
     </div>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading;
 using Frontend.Views;
 
 namespace Frontend
@@ -13,6 +14,14 @@ namespace Frontend
         [STAThread]
         static void Main()
         {
+            const string appGuid = "Global\\TaxSolution_SingleInstance_Mutex";
+            using var mutex = new Mutex(false, appGuid);
+            if (!mutex.WaitOne(0, false))
+            {
+                // Đã có 1 bản đang chạy -> Thoát ngay để không mở trùng app hoặc hiện trùng popup
+                return;
+            }
+
             // Khởi động Backend (TaxBot.exe) tự động
             StartBackend();
 
@@ -30,20 +39,20 @@ namespace Frontend
         {
             try
             {
-                // Nếu backend đã được bật sẵn ở chế độ Debug/Dev (VS Code, dlv), không khởi động TaxBot.exe nữa để tránh trùng port 8080
+                // Nếu backend đã được bật sẵn ở chế độ Debug/Dev (VS Code, dlv), không khởi động TaxBot.exe nữa để tránh trùng port 18386
                 try
                 {
                     using var pingClient = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromMilliseconds(600) };
-                    var ping = pingClient.GetAsync("http://localhost:8080/api/tax/status").Result;
+                    var ping = pingClient.GetAsync("http://127.0.0.1:18386/api/tax/status").Result;
                     if (ping.IsSuccessStatusCode)
                     {
-                        Debug.WriteLine("✅ Backend đã đang chạy sẵn trên port 8080 (Dev mode).");
+                        Debug.WriteLine("✅ Backend đã đang chạy sẵn trên port 18386 (Dev mode).");
                         return;
                     }
                 }
                 catch { }
 
-                // 1. Quét và tắt sạch tiến trình TaxBot cũ còn sót lại để giải phóng port 8080
+                // 1. Quét và tắt sạch tiến trình TaxBot cũ còn sót lại để giải phóng port 18386
                 foreach (var p in Process.GetProcessesByName("TaxBot"))
                 {
                     try
@@ -135,7 +144,7 @@ namespace Frontend
             {
                 try
                 {
-                    var response = client.GetAsync("http://localhost:8080/api/tax/status").Result;
+                    var response = client.GetAsync("http://127.0.0.1:18386/api/tax/status").Result;
                     if (response.IsSuccessStatusCode)
                     {
                         Debug.WriteLine($"✅ Backend sẵn sàng sau {(i + 1) * 500}ms");

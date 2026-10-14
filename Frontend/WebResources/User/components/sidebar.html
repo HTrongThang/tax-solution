@@ -1,45 +1,53 @@
-<div id="sidebar" class="h-full flex flex-col px-4 py-6 text-white bg-tax-dark rounded-r-[3rem] shadow-2xl transition-all duration-300 w-[17rem] overflow-hidden relative">
+<div id="sidebar"
+    class="h-full flex flex-col px-4 py-6 text-white bg-tax-dark rounded-r-[3rem] shadow-2xl transition-all duration-300 w-[17rem] overflow-hidden relative">
 
     <div id="logo-container" class="flex items-center justify-between mb-10 px-2 transition-all duration-300">
         <div class="flex items-center gap-3">
-            <div class="flex-shrink-0 w-11 h-11 bg-emerald-500 rounded-2xl flex items-center justify-center font-black text-2xl shadow-lg shadow-emerald-500/30">
+            <div
+                class="flex-shrink-0 w-11 h-11 bg-emerald-500 rounded-2xl flex items-center justify-center font-black text-2xl shadow-lg shadow-emerald-500/30">
                 T
             </div>
             <div class="sidebar-text transition-all duration-300">
                 <span class="text-xl font-bold tracking-tight text-white block whitespace-nowrap">TaxSolution</span>
-                <p class="text-[10px] text-emerald-400 font-bold uppercase tracking-widest -mt-1 whitespace-nowrap">By ACC Online <span id="sidebar-version" class="app-version-text opacity-80 font-mono ml-1 text-[9px] bg-emerald-950/60 px-1 py-0.5 rounded border border-emerald-500/30"></span></p>
+                <p class="text-[10px] text-emerald-400 font-bold uppercase tracking-widest -mt-1 whitespace-nowrap">By
+                    ACC Online <span id="sidebar-version"
+                        class="app-version-text opacity-80 font-mono ml-1 text-[9px] bg-emerald-950/60 px-1 py-0.5 rounded border border-emerald-500/30"></span>
+                </p>
             </div>
         </div>
 
         <button onclick="toggleSidebar()" class="p-2 hover:bg-white/10 rounded-xl transition-colors group">
-            <svg id="toggle-icon-svg" xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+            <svg id="toggle-icon-svg" xmlns="http://www.w3.org/2000/svg"
+                class="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" fill="none"
+                viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
             </svg>
         </button>
     </div>
 
     <nav class="flex-1 space-y-4">
         <a id="default-nav" href="javascript:void(0)" onclick="loadPage('components/crawler_table.html', this)"
-           class="nav-link flex items-center gap-4 p-3 rounded-2xl transition-all group cursor-pointer bg-emerald-600/10 text-emerald-300">
+            class="nav-link flex items-center gap-4 p-3 rounded-2xl transition-all group cursor-pointer text-slate-400 hover:bg-white/5 hover:text-white">
             <span class="text-xl flex-shrink-0 transition-transform group-hover:scale-110">📊</span>
             <span class="font-semibold sidebar-text whitespace-nowrap">Khai thác dữ liệu</span>
         </a>
 
         <a href="javascript:void(0)" onclick="loadPage('components/settings_content.html', this)"
-           class="nav-link flex items-center gap-4 p-3 rounded-2xl transition-all group text-slate-400 hover:bg-white/5 hover:text-white cursor-pointer">
+            class="nav-link flex items-center gap-4 p-3 rounded-2xl transition-all group text-slate-400 hover:bg-white/5 hover:text-white cursor-pointer">
             <span class="text-xl flex-shrink-0 transition-transform duration-500 group-hover:rotate-90">⚙️</span>
             <span class="font-semibold sidebar-text whitespace-nowrap">Cấu hình tài khoản</span>
         </a>
 
         <a href="javascript:void(0)" onclick="checkAppUpdate(true)"
-           class="nav-link flex items-center gap-4 p-3 rounded-2xl transition-all group text-slate-400 hover:bg-white/5 hover:text-white cursor-pointer">
+            class="nav-link flex items-center gap-4 p-3 rounded-2xl transition-all group text-slate-400 hover:bg-white/5 hover:text-white cursor-pointer">
             <span class="text-xl flex-shrink-0 transition-transform group-hover:scale-110">🚀</span>
             <span class="font-semibold sidebar-text whitespace-nowrap">Kiểm tra cập nhật</span>
         </a>
     </nav>
 
     <button onclick="openLogoutModal()"
-            class="mt-auto flex items-center gap-4 bg-white/5 text-red-400 hover:bg-red-500/10 p-4 rounded-2xl transition-all group cursor-pointer overflow-hidden w-full">
+        class="mt-auto flex items-center gap-4 bg-white/5 text-red-400 hover:bg-red-500/10 p-4 rounded-2xl transition-all group cursor-pointer overflow-hidden w-full">
         <span class="text-xl flex-shrink-0 transition-transform group-hover:-translate-x-1">🚪</span>
         <span class="sidebar-text font-bold text-sm whitespace-nowrap">Đăng xuất hệ thống</span>
     </button>

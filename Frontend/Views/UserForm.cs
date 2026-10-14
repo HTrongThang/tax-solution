@@ -482,6 +482,7 @@ namespace Frontend.Views
                         string toDate = packet.data.toDate;
                         string invoiceType = packet.data.invoiceType != null ? (string)packet.data.invoiceType : "ban_ra";
                         string invoiceCategory = packet.data.invoiceCategory != null ? (string)packet.data.invoiceCategory : "dien_tu";
+                        string checkResult = packet.data.checkResult != null ? (string)packet.data.checkResult : "";
 
                         if (string.IsNullOrEmpty(fromDate) || string.IsNullOrEmpty(toDate))
                         {
@@ -494,7 +495,7 @@ namespace Frontend.Views
                         _searchCts = new CancellationTokenSource();
 
                         // Start new search with cancellation support
-                        _ = HandleInvoiceSearchStream(fromDate, toDate, invoiceType, invoiceCategory, _searchCts.Token);
+                        _ = HandleInvoiceSearchStream(fromDate, toDate, invoiceType, invoiceCategory, checkResult, _searchCts.Token);
                     }
                     catch (Exception ex)
                     {
@@ -543,33 +544,19 @@ namespace Frontend.Views
                         // Phải chạy trên UI Thread vì FolderBrowserDialog là thành phần giao diện
                         this.Invoke(new Action(async () =>
                         {
-                            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+                            // Tự động lưu vào thư mục Downloads của máy tính, không mở hộp thoại
+                            string defaultDownloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                            if (!Directory.Exists(defaultDownloadsDir))
                             {
-                                fbd.Description = "Chọn thư mục để lưu tệp XML và hóa đơn cào được";
-
-                                if (fbd.ShowDialog() == DialogResult.OK)
-                                {
-                                    // Gửi đường dẫn đã chọn về cho Frontend kèm theo requestId để khớp Promise
-                                    var response = new
-                                    {
-                                        action = "OUTPUT_DIR_SELECTED",
-                                        output_dir = fbd.SelectedPath,
-                                        requestId = packet.requestId // Quan trọng: Trả lại đúng ID này
-                                    };
-                                    await PostWebMessageAsJson(response);
-                                }
-                                else
-                                {
-                                    // Nếu người dùng bấm Cancel, cũng phải báo về để FE tắt trạng thái Loading
-                                    var cancelResponse = new
-                                    {
-                                        action = "CRAWL_ERROR",
-                                        message = "Người dùng đã hủy chọn thư mục.",
-                                        requestId = packet.requestId
-                                    };
-                                    await PostWebMessageAsJson(cancelResponse);
-                                }
+                                defaultDownloadsDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                             }
+                            var response = new
+                            {
+                                action = "OUTPUT_DIR_SELECTED",
+                                output_dir = defaultDownloadsDir,
+                                requestId = packet.requestId
+                            };
+                            await PostWebMessageAsJson(response);
                         }));
                     }
                     catch (Exception ex)
@@ -583,11 +570,13 @@ namespace Frontend.Views
                     string crawlMst = packet?.mst != null ? packet.mst.ToString() : "";
                     string crawlInvoiceType = packet?.invoice_type != null ? packet.invoice_type.ToString() : "ban_ra";
 
-                    if (string.IsNullOrWhiteSpace(outputDir))
+                    if (string.IsNullOrWhiteSpace(outputDir) || outputDir == "DEFAULT_DOWNLOADS")
                     {
-                        var errorPayload = new { action = "CRAWL_ERROR", message = "Vui lòng chọn thư mục lưu trữ trước khi bắt đầu!", requestId };
-                        await PostWebMessageAsJson(errorPayload);
-                        break;
+                        outputDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                        if (!Directory.Exists(outputDir))
+                        {
+                            outputDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                        }
                     }
 
                     // Store requestId for later status messages and send an ACK back to FE immediately
@@ -651,29 +640,13 @@ namespace Frontend.Views
                                     ? "Chá»n nÆ¡i lÆ°u file Excel báº£ng kÃª chi tiáº¿t hÃ ng hÃ³a"
                                     : "Chá»n nÆ¡i lÆ°u file Excel bÃ¡o cÃ¡o tá»•ng há»£p";
 
-                                using var sfd = new SaveFileDialog
+                                // Lưu mặc định thẳng vào Downloads, không cần mở hộp thoại SaveFileDialog
+                                string defaultDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                                if (!Directory.Exists(defaultDir))
                                 {
-                                    Title = dialogTitle,
-                                    Filter = "Excel Files (*.xlsx)|*.xlsx",
-                                    FileName = defaultFileName,
-                                    DefaultExt = "xlsx",
-                                    OverwritePrompt = true
-                                };
-
-                                if (sfd.ShowDialog() != DialogResult.OK)
-                                {
-                                    // NgÆ°á»i dÃ¹ng báº¥m Cancel
-                                    var cancelPayload = new
-                                    {
-                                        action = "EXPORT_EXCEL_ERROR",
-                                        message = "NgÆ°á»i dÃ¹ng Ä‘Ã£ há»§y chá»n nÆ¡i lÆ°u.",
-                                        requestId = excelRequestId
-                                    };
-                                    await PostWebMessageAsJson(cancelPayload);
-                                    return;
+                                    defaultDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                                 }
-
-                                string selectedPath = sfd.FileName;
+                                string selectedPath = Path.Combine(defaultDir, defaultFileName);
                                 string selectedDir = Path.GetDirectoryName(selectedPath) ?? "";
 
                                 // ThÃ´ng bÃ¡o Ä‘ang xá»­ lÃ½
@@ -1011,14 +984,14 @@ namespace Frontend.Views
                 System.Diagnostics.Debug.WriteLine("Lỗi nạp cache từ SQLite: " + ex.Message);
             }
         }
-        private async Task HandleInvoiceSearchStream(string from, string to, string invoiceType = "ban_ra", string invoiceCategory = "dien_tu", CancellationToken cancellationToken = default)
+        private async Task HandleInvoiceSearchStream(string from, string to, string invoiceType = "ban_ra", string invoiceCategory = "dien_tu", string checkResult = "", CancellationToken cancellationToken = default)
         {
             try
             {
                 // Xóa RAM hóa đơn cũ trước khi nạp đợt mới
                 InvoiceMemoryService.Instance.Clear("Bắt đầu tìm kiếm đợt mới");
                 _currentInvoicesRAM.Clear();
-                await _taxService.SearchInvoicesSSE(from, to, invoiceType, invoiceCategory, (progressData) =>
+                await _taxService.SearchInvoicesSSE(from, to, invoiceType, invoiceCategory, checkResult, (progressData) =>
                 {
                     // Lưu hóa đơn vào RAM C# khi hoàn tất
                     if (progressData.IsDone && progressData.Invoices != null)

@@ -62,6 +62,7 @@ window.clearInvoiceRAM = function (reason) {
         window._invoiceCache.length = 0;
     }
     window._invoiceCache = [];
+    window._parsedXmlInvoices = [];
 
     // Xóa sạch dữ liệu hiển thị trên bảng
     const tableBody = document.getElementById('crawler-results-body');
@@ -207,7 +208,7 @@ if (window.chrome?.webview) {
             }
 
             if (payload.action === "CRAWL_FINISHED") {
-                try { window.showAlert?.('Đã hoàn thành', 'Đã cào xong hóa đơn!', 'success'); } catch { }
+                try { window.showAlert?.('Đã hoàn thành', 'Đã tải xong hóa đơn!', 'success'); } catch { }
                 if (window.finalizeSearchUI) window.finalizeSearchUI();
                 return;
             }
@@ -425,6 +426,13 @@ window.handleCancelCrawlModal = function (btn) {
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage({ action: 'CANCEL_SEARCH' });
         window.chrome.webview.postMessage({ action: 'CANCEL_CRAWL' });
+        window.chrome.webview.postMessage({ action: 'STOP_CRAWL' });
+    }
+
+    if (window._isDownloadingDetail) {
+        window._isDownloadingDetail = false;
+        if (typeof _stopDownloadTimer === 'function') _stopDownloadTimer();
+        if (typeof _restoreDownloadUI === 'function') _restoreDownloadUI();
     }
 
     // Xử lý hủy các request đang chờ phản hồi (nếu đang trong luồng handleExportXml)
@@ -638,7 +646,7 @@ window.handleLogoutClick = function () {
         if (btn) {
             btn.disabled = true;
             btn._prevText = btn.innerText;
-            btn.innerText = "⏳ Đang xuất...";
+            btn.innerText = "Đang xuất...";
             btn.style.opacity = "0.6";
             btn.style.cursor = "not-allowed";
         }
@@ -666,10 +674,54 @@ window.handleLogoutClick = function () {
 window._currentInvoiceType = 'ban_ra'; // 'ban_ra' | 'mua_vao'
 window._currentInvoiceCategory = 'dien_tu'; // 'dien_tu' | 'may_tinh_tien'
 
+const CHECK_RESULT_OPTIONS_BAN_RA = [
+    'Tất cả',
+    'Cục Thuế đã nhận',
+    'Đang tiến hành kiểm tra điều kiện cấp mã',
+    'CQT từ chối hóa đơn theo từng lần phát sinh',
+    'Hóa đơn đủ điều kiện cấp mã',
+    'Hóa đơn không đủ điều kiện cấp mã',
+    'Đã cấp mã hóa đơn',
+    'Cục Thuế đã nhận không mã',
+    'Đã kiểm tra định kỳ HĐĐT không có mã',
+    'Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền'
+];
+
+const CHECK_RESULT_OPTIONS_MUA_VAO = [
+    'Đã cấp mã hóa đơn',
+    'Cục Thuế đã nhận không mã',
+    'Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền'
+];
+
+window._checkResultByDir = {
+    ban_ra: 'Tất cả',
+    mua_vao: 'Đã cấp mã hóa đơn'
+};
+
+window.renderCheckResultOptions = function (type) {
+    const selectEl = document.getElementById('select-check-result');
+    if (!selectEl) return;
+
+    const currentType = type || window._currentInvoiceType || 'ban_ra';
+    const options = (currentType === 'mua_vao') ? CHECK_RESULT_OPTIONS_MUA_VAO : CHECK_RESULT_OPTIONS_BAN_RA;
+
+    // Lấy giá trị đã lưu cho chiều này, nếu chưa có hoặc không hợp lệ thì lấy mặc định
+    let savedVal = window._checkResultByDir[currentType];
+    if (!savedVal || !options.includes(savedVal)) {
+        savedVal = (currentType === 'mua_vao') ? 'Đã cấp mã hóa đơn' : 'Tất cả';
+        window._checkResultByDir[currentType] = savedVal;
+    }
+
+    selectEl.innerHTML = options.map(opt => `<option value="${opt}" ${opt === savedVal ? 'selected' : ''}>${opt}</option>`).join('');
+    selectEl.value = savedVal;
+    window._currentCheckResult = savedVal;
+};
+
 window.setInvoiceType = function (type) {
     window._currentInvoiceType = type;
     const btnBanRa = document.getElementById('tab-invoice-ban-ra');
     const btnMuaVao = document.getElementById('tab-invoice-mua-vao');
+
     if (type === 'ban_ra') {
         btnBanRa?.classList.add('bg-white', 'text-emerald-700', 'shadow-xs');
         btnBanRa?.classList.remove('text-slate-500');
@@ -681,6 +733,7 @@ window.setInvoiceType = function (type) {
         btnBanRa?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
         btnBanRa?.classList.add('text-slate-500');
     }
+    window.renderCheckResultOptions(type);
     window.updateFilterBadge();
 };
 
@@ -693,11 +746,19 @@ window.setInvoiceCategory = function (cat) {
         btnDienTu?.classList.remove('text-slate-500');
         btnMayTinhTien?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
         btnMayTinhTien?.classList.add('text-slate-500');
+        if (window._currentInvoiceType === 'mua_vao') {
+            window._checkResultByDir.mua_vao = 'Đã cấp mã hóa đơn';
+            window.renderCheckResultOptions('mua_vao');
+        }
     } else {
         btnMayTinhTien?.classList.add('bg-white', 'text-emerald-700', 'shadow-xs');
         btnMayTinhTien?.classList.remove('text-slate-500');
         btnDienTu?.classList.remove('bg-white', 'text-emerald-700', 'shadow-xs');
         btnDienTu?.classList.add('text-slate-500');
+        if (window._currentInvoiceType === 'mua_vao') {
+            window._checkResultByDir.mua_vao = 'Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền';
+            window.renderCheckResultOptions('mua_vao');
+        }
     }
     window.updateFilterBadge();
 };
@@ -713,6 +774,15 @@ window.updateFilterBadge = function () {
     }
 };
 
+window._currentCheckResult = 'Tất cả';
+
+window.handleCheckResultChange = function (val) {
+    const currentType = window._currentInvoiceType || 'ban_ra';
+    window._currentCheckResult = val;
+    window._checkResultByDir[currentType] = val;
+    console.log('[Filter] Đã chọn Kết quả kiểm tra (' + currentType + '):', val);
+};
+
 // --- ĐIỀU KHIỂN SEARCH FILTER DIALOG MODAL ---
 
 window.openSearchDialog = function () {
@@ -725,6 +795,9 @@ window.openSearchDialog = function () {
     if (compNameEl && compSelect) {
         compNameEl.innerText = compSelect.options[compSelect.selectedIndex]?.text || compSelect.value || 'Chưa chọn công ty';
     }
+
+    // Đảm bảo options kết quả kiểm tra tương ứng với loại hóa đơn hiện tại
+    window.renderCheckResultOptions(window._currentInvoiceType || 'ban_ra');
 
     modal.classList.remove('hidden');
 };
@@ -982,13 +1055,16 @@ window.getFilterParams = function () {
         return val;
     };
 
+    const checkResultEl = document.getElementById('select-check-result');
+
     return {
         fromDate: formatToDdMmYyyy(fromEl ? fromEl.value : ''),
         toDate: formatToDdMmYyyy(toEl ? toEl.value : ''),
         rawFrom: fromEl ? fromEl.value : '',
         rawTo: toEl ? toEl.value : '',
         invoiceType: window._currentInvoiceType || 'ban_ra',
-        invoiceCategory: window._currentInvoiceCategory || 'dien_tu'
+        invoiceCategory: window._currentInvoiceCategory || 'dien_tu',
+        checkResult: checkResultEl ? checkResultEl.value : (window._currentCheckResult || (window._currentInvoiceType === 'mua_vao' ? 'Đã cấp mã hóa đơn' : 'Tất cả'))
     };
 };
 // Hàm chuẩn hóa và bảo đảm tính chính xác của dữ liệu hóa đơn (tự sửa lỗi nếu cột tiền bị gán nhầm trạng thái)
@@ -1322,7 +1398,8 @@ window.handleSearchClick = function () {
                 fromDate: params.fromDate,
                 toDate: params.toDate,
                 invoiceType: params.invoiceType,
-                invoiceCategory: params.invoiceCategory
+                invoiceCategory: params.invoiceCategory,
+                checkResult: params.checkResult
             }
         });
 
@@ -1679,7 +1756,8 @@ window.updateCrawlerStatus = function (data) {
     const status = data.status || data.Status || '';
     const isDone = (data.is_done !== undefined) ? data.is_done : (data.IsDone || false);
     const total = data.total_on_tax || data.TotalOnTax || 0;
-    const isError = status.includes('❌') || status.toLowerCase().includes('lỗi') || status.toLowerCase().includes('timeout');
+    const isWarning = status.includes('⚠️');
+    const isError = status.includes('❌') || (!isWarning && isDone && (status.toLowerCase().includes('lỗi') || status.toLowerCase().includes('timeout')));
 
     // Hiển thị modal
     modal.style.display = 'flex';
@@ -1765,7 +1843,7 @@ async function handleExportXml(btn) {
         const cpdCancel = document.getElementById('cpd-cancel-wrap');
         if (cpdCancel) cpdCancel.style.display = (isDone || isError) ? 'none' : 'flex';
         if (cpdTitle) {
-            cpdTitle.innerText = isError ? 'Có lỗi xảy ra' : isDone ? 'Tải hoàn tất! 🎉' : 'Đang tải hóa đơn...';
+            cpdTitle.innerText = isError ? 'Có lỗi xảy ra' : isDone ? 'Tải hoàn tất' : 'Đang tải hóa đơn...';
             cpdTitle.style.color = isError ? '#dc2626' : isDone ? '#059669' : '#0f172a';
         }
         if (cpdSubtitle) {
@@ -1820,7 +1898,7 @@ async function handleExportXml(btn) {
 
     // 2. Khóa nút + hiện tiến độ ban đầu
     btn.disabled = true;
-    btn.innerHTML = `<span class="text-sm">⏳</span> Đang chuẩn bị...`;
+    btn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin inline-block mr-1 text-slate-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> <span>Đang chuẩn bị...</span>`;
     showProgress('Đang chờ chọn thư mục lưu...', 'Vui lòng chọn thư mục trong hộp thoại vừa mở.');
 
     // 3. Khởi tạo requestId
@@ -1950,14 +2028,80 @@ async function handleExportXml(btn) {
 
 // ============================================================
 // CHỨC NĂNG TẢI CHI TIẾT (DOWNLOAD DETAIL)
-// Dùng lại luồng START_CRAWL (backend CrawlAllPages) với UI nâng cao
+// Hiển thị modal tiến trình ở GIỮA MÀN HÌNH (#crawl-progress-modal)
+// Cho người dùng dễ theo dõi tiến độ và thao tác dừng/hủy
 // ============================================================
 
 window._isDownloadingDetail = false;
 window._downloadTimerInterval = null;
 window._downloadTimerSeconds = 0;
 
-// Bấm nút [🗂️ Tải chi tiết]
+function _showDownloadProgressModal() {
+    const modal = document.getElementById('crawl-progress-modal');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdCount = document.getElementById('cpd-count');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdDone = document.getElementById('cpd-icon-done');
+    const cpdError = document.getElementById('cpd-icon-error');
+    const cpdTimerBadge = document.getElementById('cpd-timer-badge');
+    const cpdFolderWrap = document.getElementById('cpd-folder-wrap');
+    const cpdFolder = document.getElementById('cpd-folder');
+    const cpdCancelWrap = document.getElementById('cpd-cancel-wrap');
+    const btnCancel = document.getElementById('btn-cancel-crawl-modal');
+
+    if (!modal) return;
+
+    modal.style.display = 'flex';
+    modal.style.opacity = '1';
+    modal.style.transition = '';
+
+    if (cpdTitle) {
+        cpdTitle.innerText = 'Đang tải hóa đơn chi tiết...';
+        cpdTitle.style.color = '#0f172a';
+    }
+    if (cpdSubtitle) {
+        cpdSubtitle.innerText = 'Hệ thống đang tải dữ liệu XML chi tiết từ Tổng cục Thuế...';
+    }
+    if (cpdStatus) {
+        cpdStatus.innerText = 'Đang khởi động tiến trình...';
+        cpdStatus.style.color = '#1e293b';
+    }
+    if (cpdSub) {
+        cpdSub.innerText = 'Vui lòng không đóng cửa sổ trong lúc tải';
+    }
+    if (cpdCount) {
+        cpdCount.innerText = '0';
+    }
+    if (cpdSpinner) cpdSpinner.style.display = 'block';
+    if (cpdDone) cpdDone.style.display = 'none';
+    if (cpdError) cpdError.style.display = 'none';
+
+    if (cpdTimerBadge) {
+        cpdTimerBadge.style.display = 'inline-block';
+        cpdTimerBadge.innerText = '00:00';
+    }
+
+    if (cpdFolderWrap) {
+        cpdFolderWrap.style.display = 'block';
+        if (cpdFolder) cpdFolder.innerText = 'Thư mục Downloads';
+    }
+
+    if (cpdCancelWrap) cpdCancelWrap.style.display = 'flex';
+    if (btnCancel) {
+        btnCancel.disabled = false;
+        btnCancel.innerHTML = `
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="5" y="5" width="14" height="14" rx="2" stroke-width="2.5" />
+            </svg>
+            <span>Dừng tiến trình</span>
+        `;
+    }
+}
+
+// Bấm nút Tải chi tiết
 function handleDownloadDetail() {
     // 1. Kiểm tra dữ liệu
     const invoices = window._invoiceCache;
@@ -1971,8 +2115,10 @@ function handleDownloadDetail() {
     }
     if (window._isDownloadingDetail) return;
 
-    // 2. Bật trạng thái
+    // 2. Bật trạng thái & hiển thị modal ở GIỮA MÀN HÌNH
     window._isDownloadingDetail = true;
+    _showDownloadProgressModal();
+
     const btnDetail = document.getElementById('btn-download-detail');
     const btnSearch = document.getElementById('btn-open-search');
     const btnStop = document.getElementById('btn-stop-download');
@@ -1980,65 +2126,68 @@ function handleDownloadDetail() {
 
     const spinnerSvg = '<svg class="w-3.5 h-3.5 animate-spin text-emerald-600 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>';
 
-    if (btnDetail) { btnDetail.disabled = true; btnDetail.innerHTML = `${spinnerSvg} <span>Đang chờ...</span>`; }
+    if (btnDetail) { btnDetail.disabled = true; btnDetail.innerHTML = `${spinnerSvg} <span>Đang tải...</span>`; }
     if (btnSearch) btnSearch.disabled = true;
-    if (btnStop) { btnStop.style.display = 'flex'; btnStop.disabled = false; btnStop.innerHTML = '<span class="text-sm">⏹</span> Dừng'; }
-    if (timerEl) { timerEl.style.display = 'inline'; timerEl.innerText = '00:00'; }
+    if (btnStop) { btnStop.style.display = 'none'; }
+    if (timerEl) { timerEl.style.display = 'none'; }
 
-    // 3. Timer đếm giờ
+    // 3. Timer đếm giờ (cập nhật đồng hồ ở giữa modal)
     window._downloadTimerSeconds = 0;
     window._downloadTimerInterval = setInterval(() => {
         window._downloadTimerSeconds++;
         const m = String(Math.floor(window._downloadTimerSeconds / 60)).padStart(2, '0');
         const s = String(window._downloadTimerSeconds % 60).padStart(2, '0');
-        if (timerEl) timerEl.innerText = `${m}:${s}`;
+        const timeStr = `${m}:${s}`;
+        const cpdTimerBadge = document.getElementById('cpd-timer-badge');
+        if (cpdTimerBadge) cpdTimerBadge.innerText = timeStr;
     }, 1000);
 
-    // 4. Gửi lệnh mở hộp thoại chọn thư mục — dùng cùng luồng START_CRAWL
+    // 4. Tạo requestId và đăng ký nhận phản hồi từ Backend
     const requestId = 'dd_' + Math.random().toString(36).slice(2);
 
-    // Timeout 10 phút
+    // Timeout 15 phút (crawl nhiều trang có thể mất thời gian)
     const timeoutTimer = setTimeout(() => {
         try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
-        _onDownloadError({ message: 'Timeout — quá trình tải quá lâu (10 phút)' });
-    }, 10 * 60 * 1000);
+        _onDownloadError({ message: 'Timeout — quá trình tải quá lâu (15 phút)' });
+    }, 15 * 60 * 1000);
 
     window._pendingWebviewRequests[requestId] = (payload) => {
         try {
             const action = payload && payload.action;
 
-            // C# trả về thư mục đã chọn
-            if (action === 'OUTPUT_DIR_SELECTED') {
-                const out = payload.output_dir || payload.outputDir || '';
-                if (!out) {
-                    clearTimeout(timeoutTimer);
-                    try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
-                    _onDownloadStopped({ message: 'Người dùng đã hủy chọn thư mục' });
-                    return;
-                }
-                if (btnDetail) btnDetail.innerHTML = `${spinnerSvg} <span>Đang gửi lệnh...</span>`;
-
-                // Gửi START_CRAWL dùng backend có sẵn
-                window.chrome.webview.postMessage({
-                    action: 'START_CRAWL',
-                    output_dir: out,
-                    mst: window._loggedInMst || window._selectedCompanyMst || '',
-                    invoice_type: window._currentInvoiceType || 'ban_ra',
-                    requestId
-                });
-                return;
-            }
-
             // Backend ACK
             if (action === 'START_CRAWL_ACK') {
-                if (btnDetail) btnDetail.innerHTML = `${spinnerSvg} <span>Đang tải...</span>`;
+                const cpdStatus = document.getElementById('cpd-status');
+                if (cpdStatus) cpdStatus.innerText = 'Đã kết nối, đang bắt đầu tải dữ liệu...';
                 return;
             }
 
-            // Cập nhật tiến độ
+            // Cập nhật tiến độ trực tiếp lên modal giữa màn hình
             if (action === 'CRAWL_STATUS_UPDATE') {
                 const total = payload.total_invoices || 0;
                 const st = payload.status || '';
+
+                const cpdStatus = document.getElementById('cpd-status');
+                const cpdCount = document.getElementById('cpd-count');
+                const cpdSub = document.getElementById('cpd-sub');
+
+                if (cpdStatus && st) {
+                    if (st.includes('quay về trang') || st.includes('chuẩn bị')) {
+                        cpdStatus.innerText = 'Đang chuẩn bị dữ liệu...';
+                    } else {
+                        cpdStatus.innerText = st;
+                    }
+                }
+                if (cpdCount && total > 0) {
+                    cpdCount.innerText = total;
+                }
+                if (cpdSub) {
+                    if (st.includes('bóc tách')) {
+                        cpdSub.innerText = 'Đang phân tích cấu trúc XML và bóc tách dữ liệu chi tiết...';
+                    } else if (st.includes('Trang')) {
+                        cpdSub.innerText = 'Đang kết nối Tổng cục Thuế để tải chi tiết từng dòng...';
+                    }
+                }
                 if (btnDetail) {
                     btnDetail.innerHTML = `${spinnerSvg} <span>${total > 0 ? total + ' HĐ' : (st || 'Đang tải...')}</span>`;
                 }
@@ -2053,7 +2202,7 @@ function handleDownloadDetail() {
                 return;
             }
 
-            // Hoàn tất
+            // Hoàn tất hoặc Dừng
             if (action === 'CRAWL_FINISHED') {
                 clearTimeout(timeoutTimer);
                 try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
@@ -2071,23 +2220,55 @@ function handleDownloadDetail() {
         }
     };
 
-    // 5. Kích hoạt: mở hộp thoại chọn thư mục
+    // 5. Kích hoạt tải ngay lập tức (tự động lưu vào thư mục Downloads)
     window.chrome.webview.postMessage({
-        action: 'REQUEST_SELECT_OUTPUT_DIR',
+        action: 'START_CRAWL',
+        output_dir: 'DEFAULT_DOWNLOADS',
+        mst: window._loggedInMst || window._selectedCompanyMst || '',
+        invoice_type: window._currentInvoiceType || 'ban_ra',
         requestId
     });
 }
 
-// Bấm nút [⏹ Dừng]
+// Bấm nút [Dừng] trên Modal hoặc toolbar
 function handleStopDownload() {
     if (!(window.chrome?.webview)) return;
     const btnStop = document.getElementById('btn-stop-download');
-    if (btnStop) { btnStop.innerHTML = '<span class="text-sm">⏳</span> Đang dừng...'; btnStop.disabled = true; }
-    // Gửi lệnh dừng dùng endpoint /stop có sẵn
+    if (btnStop) {
+        btnStop.innerHTML = `
+            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            <span>Đang dừng...</span>
+        `;
+        btnStop.disabled = true;
+    }
+
+    const btnCancelModal = document.getElementById('btn-cancel-crawl-modal');
+    if (btnCancelModal) {
+        btnCancelModal.innerHTML = `
+            <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            <span>Đang dừng...</span>
+        `;
+        btnCancelModal.disabled = true;
+    }
+
+    const cpdStatus = document.getElementById('cpd-status');
+    if (cpdStatus) {
+        cpdStatus.innerText = 'Đang dừng tiến trình tải...';
+        cpdStatus.style.color = '#e11d48';
+    }
+
+    // Gửi lệnh dừng tới Backend C# & Go
     window.chrome.webview.postMessage({ action: 'STOP_CRAWL' });
+    window.chrome.webview.postMessage({ action: 'CANCEL_CRAWL' });
 }
 
-// Hoàn tất
+// Hoàn tất tải chi tiết
 function _onDownloadFinished(payload) {
     window._isDownloadingDetail = false;
     _stopDownloadTimer();
@@ -2098,11 +2279,61 @@ function _onDownloadFinished(payload) {
     const totalSkipped = payload?.total_files_skipped || 0;
     const totalFailed = payload?.total_files_failed || 0;
 
+    const modal = document.getElementById('crawl-progress-modal');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdCount = document.getElementById('cpd-count');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdDone = document.getElementById('cpd-icon-done');
+    const cpdCancelWrap = document.getElementById('cpd-cancel-wrap');
+
+    if (modal) {
+        if (cpdTitle) {
+            cpdTitle.innerText = 'Tải hoàn tất';
+            cpdTitle.style.color = '#059669';
+        }
+        if (cpdSubtitle) {
+            cpdSubtitle.innerText = 'Đã tải và phân tích dữ liệu chi tiết thành công';
+        }
+        if (cpdStatus) {
+            cpdStatus.innerText = parsedCount > 0 ? `Đã xử lý xong ${parsedCount} hóa đơn` : 'Đã hoàn tất tải toàn bộ hóa đơn';
+            cpdStatus.style.color = '#059669';
+        }
+        if (cpdSub) {
+            let detail = '';
+            if (totalFound > 0) {
+                detail = `Tổng file: ${totalFound}`;
+                if (totalSkipped > 0) detail += ` | Bỏ qua: ${totalSkipped}`;
+                if (totalFailed > 0) detail += ` | Lỗi: ${totalFailed}`;
+            }
+            cpdSub.innerText = detail;
+        }
+        if (cpdCount && parsedCount > 0) {
+            cpdCount.innerText = parsedCount;
+        }
+        if (cpdSpinner) cpdSpinner.style.display = 'none';
+        if (cpdDone) cpdDone.style.display = 'flex';
+        if (cpdCancelWrap) cpdCancelWrap.style.display = 'none';
+
+        // Tự động ẩn modal sau 3 giây
+        setTimeout(() => {
+            modal.style.transition = 'opacity 0.35s ease';
+            modal.style.opacity = '0';
+            setTimeout(() => {
+                modal.style.display = 'none';
+                modal.style.opacity = '1';
+                modal.style.transition = '';
+            }, 380);
+        }, 3000);
+    }
+
     if (parsedCount > 0) {
         window._parsedXmlInvoices = payload?.parsed_invoices || [];
-        console.log(`[XML Parser] Đã bóc tách thành công ${parsedCount} hóa đơn:`, window._parsedXmlInvoices);
+        console.log(`[XML Parser] Đã phân tích thành công ${parsedCount} hóa đơn:`, window._parsedXmlInvoices);
 
-        let msg = `Đã bóc tách thành công: ${parsedCount} hóa đơn`;
+        let msg = `Đã phân tích thành công: ${parsedCount} hóa đơn`;
         if (totalFound > 0) {
             msg += ` (Tổng quét: ${totalFound} file`;
             if (totalSkipped > 0) msg += `, Bỏ qua: ${totalSkipped}`;
@@ -2115,20 +2346,94 @@ function _onDownloadFinished(payload) {
     }
 }
 
-// Dừng
+// Dừng tải chi tiết
 function _onDownloadStopped(payload) {
     window._isDownloadingDetail = false;
     _stopDownloadTimer();
     _restoreDownloadUI();
-    window.showAlert?.('Thông báo', payload.message || 'Đã dừng tiến trình', 'warning');
+
+    const modal = document.getElementById('crawl-progress-modal');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdCancelWrap = document.getElementById('cpd-cancel-wrap');
+
+    if (modal) {
+        if (cpdTitle) {
+            cpdTitle.innerText = 'Đã dừng tải';
+            cpdTitle.style.color = '#e11d48';
+        }
+        if (cpdSubtitle) {
+            cpdSubtitle.innerText = 'Tiến trình đã được dừng theo yêu cầu';
+        }
+        if (cpdStatus) {
+            cpdStatus.innerText = payload?.message || 'Đã dừng tải chi tiết';
+            cpdStatus.style.color = '#e11d48';
+        }
+        if (cpdSub) cpdSub.innerText = '';
+        if (cpdSpinner) cpdSpinner.style.display = 'none';
+        if (cpdCancelWrap) cpdCancelWrap.style.display = 'none';
+
+        setTimeout(() => {
+            modal.style.transition = 'opacity 0.3s ease';
+            modal.style.opacity = '0';
+            setTimeout(() => {
+                modal.style.display = 'none';
+                modal.style.opacity = '1';
+                modal.style.transition = '';
+            }, 300);
+        }, 1800);
+    }
+
+    window.showAlert?.('Thông báo', payload?.message || 'Đã dừng tiến trình', 'warning');
 }
 
-// Lỗi
+// Lỗi tải chi tiết
 function _onDownloadError(payload) {
     window._isDownloadingDetail = false;
     _stopDownloadTimer();
     _restoreDownloadUI();
-    window.showAlert?.('Lỗi', payload.message || 'Lỗi trong quá trình tải', 'error');
+
+    const modal = document.getElementById('crawl-progress-modal');
+    const cpdTitle = document.getElementById('cpd-title');
+    const cpdSubtitle = document.getElementById('cpd-subtitle');
+    const cpdStatus = document.getElementById('cpd-status');
+    const cpdSub = document.getElementById('cpd-sub');
+    const cpdSpinner = document.getElementById('cpd-spinner-svg');
+    const cpdError = document.getElementById('cpd-icon-error');
+    const cpdCancelWrap = document.getElementById('cpd-cancel-wrap');
+
+    if (modal) {
+        if (cpdTitle) {
+            cpdTitle.innerText = 'Lỗi tải chi tiết';
+            cpdTitle.style.color = '#dc2626';
+        }
+        if (cpdSubtitle) {
+            cpdSubtitle.innerText = 'Không thể hoàn tất tiến trình';
+        }
+        if (cpdStatus) {
+            cpdStatus.innerText = payload?.message || 'Lỗi không xác định';
+            cpdStatus.style.color = '#dc2626';
+        }
+        if (cpdSub) cpdSub.innerText = 'Vui lòng kiểm tra lại kết nối mạng hoặc thử lại sau';
+        if (cpdSpinner) cpdSpinner.style.display = 'none';
+        if (cpdError) cpdError.style.display = 'flex';
+        if (cpdCancelWrap) cpdCancelWrap.style.display = 'none';
+
+        setTimeout(() => {
+            modal.style.transition = 'opacity 0.35s ease';
+            modal.style.opacity = '0';
+            setTimeout(() => {
+                modal.style.display = 'none';
+                modal.style.opacity = '1';
+                modal.style.transition = '';
+            }, 380);
+        }, 3500);
+    }
+
+    window.showAlert?.('Lỗi', payload?.message || 'Lỗi trong quá trình tải', 'error');
 }
 
 function _stopDownloadTimer() {
@@ -2141,8 +2446,25 @@ function _restoreDownloadUI() {
     const btnStop = document.getElementById('btn-stop-download');
     const timerEl = document.getElementById('download-timer');
     const hasData = Array.isArray(window._invoiceCache) && window._invoiceCache.length > 0;
-    if (btnDetail) { btnDetail.disabled = !hasData; btnDetail.innerHTML = '<span class="text-sm">🗂️</span> Tải chi tiết'; }
+    if (btnDetail) {
+        btnDetail.disabled = !hasData;
+        btnDetail.innerHTML = `
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            <span>Tải chi tiết</span>
+        `;
+    }
     if (btnSearch) btnSearch.disabled = false;
-    if (btnStop) { btnStop.style.display = 'none'; btnStop.disabled = false; btnStop.innerHTML = '<span class="text-sm">⏹</span> Dừng'; }
-    setTimeout(() => { if (timerEl) timerEl.style.display = 'none'; }, 4000);
+    if (btnStop) {
+        btnStop.style.display = 'none';
+        btnStop.disabled = false;
+        btnStop.innerHTML = `
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <rect x="5" y="5" width="14" height="14" rx="2" />
+            </svg>
+            <span>Dừng</span>
+        `;
+    }
+    if (timerEl) timerEl.style.display = 'none';
 }

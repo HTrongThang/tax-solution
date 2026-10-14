@@ -107,12 +107,16 @@
             }
 
             if (!hasDetails) {
-                var confirmExport = confirm(
-                    '⚠️ Dữ liệu hiện tại chưa được bóc tách chi tiết từng mặt hàng (XML).\n\n' +
-                    'Bạn nên bấm nút [📥 Tải chi tiết] trước để tự động tải file XML hóa đơn và bóc tách đầy đủ danh mục hàng hóa.\n\n' +
-                    'Bạn có muốn tiếp tục xuất với dữ liệu tổng quan hiện tại không?'
-                );
-                if (!confirmExport) return;
+                if (typeof window.showAlert === 'function') {
+                    window.showAlert(
+                        'Chưa tải chi tiết hóa đơn',
+                        'Bảng kê chi tiết hàng hóa yêu cầu dữ liệu từng dòng hàng (file XML). Vui lòng bấm nút "Tải chi tiết" trên thanh công cụ trước khi xuất báo cáo!',
+                        'warning'
+                    );
+                } else {
+                    alert('Chưa có dữ liệu chi tiết! Vui lòng bấm nút "Tải chi tiết" trước khi xuất Bảng kê chi tiết hàng hóa.');
+                }
+                return;
             }
 
             // Chọn nguồn dữ liệu gửi xuống C#
@@ -150,11 +154,18 @@
                     return;
                 }
 
+                if (action === 'EXPORT_EXCEL_CANCELLED') {
+                    delete window._pendingWebviewRequests[requestId];
+                    console.log('[ExportBKCT] Người dùng đã hủy chọn nơi lưu.');
+                    return;
+                }
+
                 if (action === 'EXPORT_EXCEL_ERROR') {
                     delete window._pendingWebviewRequests[requestId];
                     var msg = payload.message || 'Lỗi không xác định';
                     console.error('[ExportBKCT] ❌ Lỗi:', msg);
-                    if (msg.includes('hủy')) {
+                    var isCancelled = payload.is_cancelled || msg.toLowerCase().includes('hủy') || msg.includes('há»§y');
+                    if (isCancelled) {
                         console.log('[ExportBKCT] Người dùng hủy xuất.');
                     } else if (window.showAlert) {
                         window.showAlert('Lỗi xuất Excel', msg, 'error');

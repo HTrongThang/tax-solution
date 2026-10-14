@@ -1,3 +1,5 @@
 
 dist/
 .vs/
+*.exe
+output_installer/

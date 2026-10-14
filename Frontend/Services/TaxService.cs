@@ -16,14 +16,14 @@ namespace Frontend.Services
     {
         private readonly HttpClient _client = new HttpClient
         {
-            BaseAddress = new Uri("http://localhost:8080"),
+            BaseAddress = new Uri("http://127.0.0.1:18386"),
             Timeout = TimeSpan.FromSeconds(30)
         };
 
         // Client riêng cho SSE (stream dài hạn) — timeout do CancellationToken quản lý
         private readonly HttpClient _sseClient = new HttpClient
         {
-            BaseAddress = new Uri("http://localhost:8080"),
+            BaseAddress = new Uri("http://127.0.0.1:18386"),
             Timeout = System.Threading.Timeout.InfiniteTimeSpan
         };
 
@@ -183,7 +183,7 @@ namespace Frontend.Services
             }
         }
 
-        public async Task SearchInvoicesSSE(string fromDate, string toDate, string invoiceType = "ban_ra", string invoiceCategory = "dien_tu", Action<StreamData> onProgress = null, System.Threading.CancellationToken cancellationToken = default)
+        public async Task SearchInvoicesSSE(string fromDate, string toDate, string invoiceType = "ban_ra", string invoiceCategory = "dien_tu", string checkResult = "", Action<StreamData> onProgress = null, System.Threading.CancellationToken cancellationToken = default)
         {
             // Improved SSE reader with cancellation support and better logging
             try
@@ -218,7 +218,8 @@ namespace Frontend.Services
 
                 string safeType = Uri.EscapeDataString(string.IsNullOrEmpty(invoiceType) ? "ban_ra" : invoiceType);
                 string safeCat = Uri.EscapeDataString(string.IsNullOrEmpty(invoiceCategory) ? "dien_tu" : invoiceCategory);
-                var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}&type={safeType}&category={safeCat}";
+                string safeCheckResult = Uri.EscapeDataString(checkResult ?? "");
+                var requestUri = $"/api/tax/searchInvoice?from={fDate}&to={tDate}&type={safeType}&category={safeCat}&check_result={safeCheckResult}";
                 using (var response = await _sseClient.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
                 {
                     // Xử lý riêng 409 Conflict (hệ thống đang bận)

@@ -142,6 +142,7 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 	toDate := c.Query("to")
 	invoiceType := c.DefaultQuery("type", "ban_ra")
 	category := c.DefaultQuery("category", "dien_tu")
+	checkResult := c.DefaultQuery("check_result", "")
 
 	if fromDate == "" || toDate == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Thiếu ngày tháng"})
@@ -168,7 +169,7 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 	go func() {
 		defer close(streamChan)
 		// Gọi crawler (truyền ctx để hỗ trợ ngắt kết nối)
-		_, _ = h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, invoiceType, category, streamChan)
+		_, _ = h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, invoiceType, category, checkResult, streamChan)
 	}()
 
 	// Đẩy dữ liệu về Client

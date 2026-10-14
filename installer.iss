@@ -1,6 +1,6 @@
 ; Script generated for Inno Setup 6
 #define MyAppName "TaxSolution"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.8"
 #define MyAppPublisher "ACC Online"
 #define MyAppURL "https://github.com/HTrongThang/tax-solution"
 #define MyAppExeName "Frontend.exe"
@@ -48,4 +48,4 @@ Name: "{group}\Gỡ cài đặt {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\Frontend.exe"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall

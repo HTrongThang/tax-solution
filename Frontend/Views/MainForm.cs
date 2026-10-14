@@ -23,6 +23,11 @@ namespace Frontend.Views
         public MainForm()
         {
             InitializeComponent();
+            try
+            {
+                this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch { }
             this.Text = $"TaxSolution - Đăng nhập ({AppVersionHelper.DisplayVersion})";
             this.Size = new Size(900, 600);
             this.StartPosition = FormStartPosition.CenterScreen;
