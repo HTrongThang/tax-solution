@@ -28,6 +28,7 @@ namespace Frontend.Views
         // Current crawl request id received from frontend (if any)
         private string _currentCrawlRequestId;
         private string _currentCrawlOutputDir;
+        private bool _crawlFolderIsDedicated; // true khi backend trả về thư mục riêng của lần cào này (an toàn để xóa XML sau khi bóc tách)
         private string _currentCrawlMst;
         private string _currentCrawlInvoiceType;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
@@ -1044,6 +1045,7 @@ namespace Frontend.Views
         {
             if (_isCrawling) return;
             _currentCrawlOutputDir = path;
+            _crawlFolderIsDedicated = false;
             _currentCrawlMst = mst;
             _currentCrawlInvoiceType = invoiceType;
             _currentCrawlRequestId = requestId;
@@ -1052,6 +1054,7 @@ namespace Frontend.Views
             if (!string.IsNullOrWhiteSpace(finalOutputDir))
             {
                 _currentCrawlOutputDir = finalOutputDir;
+                _crawlFolderIsDedicated = true;
             }
 
             if (status == "success")
@@ -1114,7 +1117,7 @@ namespace Frontend.Views
                         {
                             TargetMst = _currentCrawlMst,
                             IsMuaVao = _currentCrawlInvoiceType == "mua_vao",
-                            DeleteAfterParsing = true
+                            DeleteAfterParsing = _crawlFolderIsDedicated
                         };
 
                         parseResult = await XmlInvoiceParserService.Instance.ParseDirectoryAsync(

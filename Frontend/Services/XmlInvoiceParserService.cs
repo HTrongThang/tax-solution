@@ -77,6 +77,7 @@ namespace Frontend.Services
             // - Nếu thư mục chỉ định đã chứa trực tiếp file .xml -> Chỉ lấy các file trong thư mục này (TopDirectoryOnly)
             // - Nếu thư mục chỉ định là thư mục cha chứa nhiều lần tải (các thư mục con dạng MST_Type_DateTime) -> Tự động chọn thư mục con mới nhất vừa tải về
             string targetFolder = directoryPath;
+            bool folderAutoSelected = false; // true nếu thư mục đích do hệ thống tự đoán (không phải thư mục người gọi chỉ định trực tiếp)
             string[] xmlFiles = Array.Empty<string>();
 
             try
@@ -100,6 +101,7 @@ namespace Frontend.Services
                         if (latestDir != null)
                         {
                             targetFolder = latestDir.FullName;
+                            folderAutoSelected = true;
                             xmlFiles = Directory.GetFiles(targetFolder, "*.xml", SearchOption.TopDirectoryOnly);
                             Debug.WriteLine($"[XmlInvoiceParserService] Đã tự động chọn thư mục mới tải về gần nhất: {targetFolder} ({xmlFiles.Length} files)");
                         }
@@ -126,6 +128,7 @@ namespace Frontend.Services
             int parsedCount = 0;
             int skippedCount = 0;
             int failedCount = 0;
+            var successfullyParsedFiles = new List<string>();
 
             for (int i = 0; i < xmlFiles.Length; i++)
             {
@@ -151,6 +154,7 @@ namespace Frontend.Services
                             ReconcileTaxRounding(invoice);
 
                             result.Invoices.Add(invoice);
+                            successfullyParsedFiles.Add(filePath);
                             parsedCount++;
                         }
                         else
@@ -188,21 +192,18 @@ namespace Frontend.Services
             LastParsedInvoices = result.Invoices;
             InvoiceMemoryService.Instance.SetParsedXmlInvoices(result.Invoices);
 
-            // Xóa thư mục tải về tạm sau khi bóc tách xong vào bộ nhớ RAM nếu có yêu cầu
-            if (options?.DeleteAfterParsing == true && !string.IsNullOrWhiteSpace(targetFolder) && Directory.Exists(targetFolder))
+            // Chỉ xóa đúng các file XML đã bóc tách THÀNH CÔNG (giữ lại file bị lọc MST/kỳ hoặc bị lỗi,
+            // KHÔNG xóa cả thư mục để tránh mất file khác của người dùng)
+            // AN TOÀN: tuyệt đối không xóa khi thư mục đích là thư mục con tự đoán (có thể là dữ liệu của người dùng)
+            if (options?.DeleteAfterParsing == true && !folderAutoSelected && !string.IsNullOrWhiteSpace(targetFolder) && Directory.Exists(targetFolder))
             {
-                try
+                foreach (var xmlPath in successfullyParsedFiles)
                 {
-                    var dirInfo = new DirectoryInfo(targetFolder);
-                    if (dirInfo.Parent != null)
+                    try { File.Delete(xmlPath); }
+                    catch (Exception exDel)
                     {
-                        Directory.Delete(targetFolder, true);
-                        Debug.WriteLine($"[XmlInvoiceParserService] Đã xóa thư mục tải về sau khi bóc tách: {targetFolder}");
+                        Debug.WriteLine($"[XmlInvoiceParserService] Lỗi khi xóa file '{xmlPath}': {exDel.Message}");
                     }
-                }
-                catch (Exception exDel)
-                {
-                    Debug.WriteLine($"[XmlInvoiceParserService] Lỗi khi xóa thư mục '{targetFolder}': {exDel.Message}");
                 }
             }
 

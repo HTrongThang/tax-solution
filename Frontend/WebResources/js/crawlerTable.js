@@ -1788,7 +1788,7 @@ window.updateCrawlerStatus = function (data) {
             cpdSub.innerText = data.sub || data.sub_detail || data.SubDetail || '';
         }
     }
-    if (cpdCount) {
+    if (cpdCount && (total > 0 || isDone)) {
         cpdCount.innerText = total > 0 ? total : 0;
     }
     if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';

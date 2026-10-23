@@ -910,9 +910,14 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 		// Gửi trạng thái trang hiện tại
 		if stream != nil {
+			statusText := fmt.Sprintf("🔄 Đang xử lý trang %d...", pageIdx)
+			if rc, rt := c.pagerPos(); rt > 0 {
+				statusText = fmt.Sprintf("🔄 Đang xử lý trang %d/%d...", rc, rt)
+			}
 			stream <- models.StreamData{
-				Status:      fmt.Sprintf("🔄 Đang xử lý trang %d...", pageIdx),
+				Status:      statusText,
 				CurrentPage: pageIdx,
+				TotalOnTax:  totalOnTax,
 				IsDone:      false,
 			}
 			// time.Sleep(700 * time.Millisecond)
@@ -983,17 +988,17 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 		// Hệ thống thuế chậm: nếu bảng chưa hiển thị dòng nào thì chờ rảnh rồi bóc lại (tối đa 4 lần)
 		for scrapeTry := 0; scrapeTry < 4; scrapeTry++ {
-		headers = nil
-		rows = nil
-		if scrapeTry > 0 {
-			if ctx.Err() != nil || c.StopRequested {
-				break
+			headers = nil
+			rows = nil
+			if scrapeTry > 0 {
+				if ctx.Err() != nil || c.StopRequested {
+					break
+				}
+				c.waitTaxIdle(ctx, stream, 45*time.Second)
+				time.Sleep(2 * time.Second)
 			}
-			c.waitTaxIdle(ctx, stream, 45*time.Second)
-			time.Sleep(2 * time.Second)
-		}
-		_ = rod.Try(func() {
-			evalRes := c.Page.MustEval(`() => {
+			_ = rod.Try(func() {
+				evalRes := c.Page.MustEval(`() => {
 				const allRows = Array.from(document.querySelectorAll(".ant-table-tbody tr.ant-table-row")).filter(r => !r.closest('.ant-tabs-tabpane-inactive'));
 				if (allRows.length === 0) return { headers: [], rows: [] };
 
@@ -1027,23 +1032,23 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 				return { headers: headers, rows: rows };
 			}`)
 
-			hArr := evalRes.Get("headers").Arr()
-			for _, h := range hArr {
-				headers = append(headers, strings.ToLower(strings.TrimSpace(h.String())))
-			}
-
-			rArr := evalRes.Get("rows").Arr()
-			for _, r := range rArr {
-				var rowCells []string
-				for _, cell := range r.Arr() {
-					rowCells = append(rowCells, strings.TrimSpace(cell.String()))
+				hArr := evalRes.Get("headers").Arr()
+				for _, h := range hArr {
+					headers = append(headers, strings.ToLower(strings.TrimSpace(h.String())))
 				}
-				rows = append(rows, rowCells)
+
+				rArr := evalRes.Get("rows").Arr()
+				for _, r := range rArr {
+					var rowCells []string
+					for _, cell := range r.Arr() {
+						rowCells = append(rowCells, strings.TrimSpace(cell.String()))
+					}
+					rows = append(rows, rowCells)
+				}
+			})
+			if len(rows) > 0 {
+				break
 			}
-		})
-		if len(rows) > 0 {
-			break
-		}
 		}
 
 		fmt.Printf("📦 Trang %d: bóc được %d dòng hóa đơn (nhận diện %d cột tiêu đề).\n", pageIdx, len(rows), len(headers))
@@ -1316,7 +1321,26 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 			break
 		}
 
-		// Thử chuyển sang trang tiếp theo (đa chiến lược: Icon Next, ant-pagination-next, Input Simple Pager, Số trang)
+		// Ưu tiên: bấm nút > bằng CLICK CHUỘT THẬT và xác nhận ô "N / M" đã đổi trang thật.
+		// Nếu thuế không chuyển trang -> dừng an toàn, không đếm trang ảo.
+		if curPos, totPos := c.pagerPos(); totPos > 0 {
+			if !c.goNextPage(curPos, totPos) {
+				if ctx.Err() != nil || c.StopRequested {
+					c.CurrentStatus = "Đã hủy"
+					return allInvoices, fmt.Errorf("thao tác đã bị hủy")
+				}
+				fmt.Printf("⚠️ Thuế không chuyển được sang trang %d (đang kẹt ở %d/%d). Dừng để tránh trang ảo!\n", curPos+1, curPos, totPos)
+				c.logError("chuyển trang", fmt.Errorf("không chuyển được sang trang %d", curPos+1), fmt.Sprintf("đã lấy %d/%d hóa đơn", len(allInvoices), totalOnTax))
+				if stream != nil {
+					stream <- models.StreamData{Status: fmt.Sprintf("⚠️ Chỉ lấy được %d/%d hóa đơn (thuế không chuyển được sang trang %d)", len(allInvoices), totalOnTax, curPos+1), TotalOnTax: totalOnTax, IsDone: false}
+				}
+				break
+			}
+			c.waitTaxIdle(ctx, stream, 60*time.Second)
+			continue
+		}
+
+		// Fallback (không có ô "N / M"): đa chiến lược Icon Next, ant-pagination-next, Input Simple Pager, Số trang
 		var nextClicked bool
 		var nextMethod string
 		for attempt := 1; attempt <= 40 && !nextClicked && nextMethod != "last-page"; attempt++ {
@@ -1879,6 +1903,54 @@ func (c *CrawlerService) clickPager(dir string) bool {
 
 // clickPagerOpt như clickPager; force=true sẽ gỡ thuộc tính disabled (nút bị thuế khóa kẹt) trước khi bấm.
 func (c *CrawlerService) clickPagerOpt(dir string, force bool) bool {
+	// Bước 1: tìm nút, gắn marker; trả 0=không thấy, 1=đang disabled, 2=sẵn sàng
+	state := 0
+	_ = rod.Try(func() {
+		res := c.Page.Timeout(5*time.Second).MustEval(`(dir) => {
+			document.querySelectorAll('[data-pager-target]').forEach(e => e.removeAttribute('data-pager-target'));
+			const shown = (el) => !el.closest('.ant-tabs-tabpane-inactive') && (el.offsetParent !== null || el.getClientRects().length > 0);
+			let btn = null;
+			const el = Array.from(document.querySelectorAll('div')).find(d => d.children.length === 0 && /^\s*\d+\s*\/\s*\d+\s*$/.test(d.textContent || '') && shown(d));
+			if (el) {
+				const col = el.closest('.ant-col');
+				const sib = col ? (dir === 'left' ? col.previousElementSibling : col.nextElementSibling) : null;
+				btn = sib ? sib.querySelector('button') : null;
+				if (btn && !btn.querySelector('.anticon-' + dir)) btn = null;
+			}
+			if (!btn) {
+				const ic = Array.from(document.querySelectorAll('button i.anticon-' + dir)).find(shown);
+				btn = ic ? ic.closest('button') : null;
+			}
+			if (!btn) return 0;
+			btn.setAttribute('data-pager-target', dir);
+			return (btn.disabled || btn.hasAttribute('disabled')) ? 1 : 2;
+		}`, dir)
+		state = res.Int()
+	})
+	if state == 0 {
+		return false
+	}
+	if state == 2 {
+		// Click chuột thật qua CDP (isTrusted=true) để React nhận sự kiện
+		nativeOK := false
+		_ = rod.Try(func() {
+			el := c.Page.Timeout(5 * time.Second).MustElement("[data-pager-target='" + dir + "']")
+			_ = el.ScrollIntoView()
+			if err := el.Timeout(5*time.Second).Click("left", 1); err == nil {
+				nativeOK = true
+			}
+		})
+		if nativeOK {
+			return true
+		}
+	} else if !force {
+		return false
+	}
+	return c.clickPagerJS(dir, force)
+}
+
+// clickPagerJS: phương án dự phòng, click giả lập bằng JS (có thể bị React bỏ qua).
+func (c *CrawlerService) clickPagerJS(dir string, force bool) bool {
 	clicked := false
 	err := rod.Try(func() {
 		res := c.Page.Timeout(5*time.Second).MustEval(`(dir, force) => {
