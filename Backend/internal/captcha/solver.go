@@ -31,6 +31,19 @@ var fallbackModels = []string{
 
 var nonAlnum = regexp.MustCompile(`[^A-Z0-9]`)
 
+// ErrDisabled được trả về khi người dùng tắt giải captcha bằng AI.
+var ErrDisabled = errors.New("giải captcha bằng AI đang tắt (CAPTCHA_AI_ENABLED=false)")
+
+// Enabled cho biết có dùng AI để giải captcha hay không.
+// Bật/tắt bằng CAPTCHA_AI_ENABLED trong .env (mặc định: bật nếu có GEMINI_API_KEY).
+func Enabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CAPTCHA_AI_ENABLED"))) {
+	case "false", "0", "off", "no":
+		return false
+	}
+	return strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != ""
+}
+
 // LoadEnv đọc các file .env và nạp vào os.Environ nếu chưa được set.
 func LoadEnv(paths ...string) {
 	for _, p := range paths {
@@ -97,6 +110,9 @@ func isRetryable(err error) bool {
 // SolveCaptchaImage giải mã một ảnh captcha (raw bytes hoặc base64).
 // Tự động retry hoặc chuyển sang model dự phòng nếu model chính hết quota.
 func SolveCaptchaImage(ctx context.Context, imgBytes []byte) (string, error) {
+	if !Enabled() {
+		return "", ErrDisabled
+	}
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return "", errors.New("chưa cấu hình GEMINI_API_KEY trong .env")

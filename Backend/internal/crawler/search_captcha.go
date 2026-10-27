@@ -131,7 +131,7 @@ func (c *CrawlerService) handleSearchCaptcha(ctx context.Context, stream chan mo
 		if commaIdx := strings.Index(img, ","); commaIdx != -1 {
 			imgBytes, _ = base64.StdEncoding.DecodeString(img[commaIdx+1:])
 		}
-		if len(imgBytes) > 0 {
+		if len(imgBytes) > 0 && captcha.Enabled() {
 			sendStream(ctx, stream, models.StreamData{Status: "🤖 Đang giải mã CAPTCHA  ..."})
 			if aiCode, aiErr := captcha.SolveCaptchaImage(ctx, imgBytes); aiErr == nil && len(aiCode) == 6 {
 				fmt.Printf("Giải captcha được: %s\n", aiCode)

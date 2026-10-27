@@ -336,7 +336,7 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 		return err
 	}
 
-	isAutoSolve := strings.TrimSpace(manualCaptcha) == ""
+	isAutoSolve := strings.TrimSpace(manualCaptcha) == "" && captcha.Enabled()
 	maxAttempts := 1
 	if isAutoSolve {
 		maxAttempts = 3 // Thử tự động tối đa 3 lần với AI nếu portal báo sai captcha

@@ -85,6 +85,15 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 		return
 	}
 
+	if !captcha.Enabled() {
+		c.JSON(http.StatusOK, models.Response{
+			Status:  "success",
+			Message: "Đã lấy mã captcha thành công!",
+			Data:    base64Data,
+		})
+		return
+	}
+
 	// 2. Tự động nhận diện trước bằng Gemini AI nếu có thể
 	var aiCode string
 	cleanBase64 := base64Data
