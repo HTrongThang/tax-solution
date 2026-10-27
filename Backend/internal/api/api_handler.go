@@ -13,32 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
-
-// Nhớ thư mục tải gần nhất để tái sử dụng khi nó chưa có file nào (tránh sinh nhiều thư mục rỗng khi tải lỗi/bấm lại)
-var (
-	downloadDirMu   sync.Mutex
-	lastDownloadKey string
-	lastDownloadDir string
-)
-
-// isDirEffectivelyEmpty: thư mục tồn tại và chỉ chứa thư mục tạm .temp_download (chưa có file hóa đơn nào).
-func isDirEffectivelyEmpty(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.Name() != ".temp_download" {
-			return false
-		}
-	}
-	return true
-}
 
 type Handler struct {
 	Crawler *crawler.CrawlerService
@@ -308,18 +286,6 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 	}
 	finalDir := filepath.Join(outputDir, subFolder)
 
-	// Không tạo thêm thư mục mới nếu lần tải trước (cùng MST, chiều, nơi lưu) chưa tải được file nào → dùng lại thư mục đó (không xóa gì cả)
-	downloadKey := outputDir + "|" + mst + "|" + invoiceType
-	downloadDirMu.Lock()
-	if lastDownloadKey == downloadKey && lastDownloadDir != "" && isDirEffectivelyEmpty(lastDownloadDir) {
-		finalDir = lastDownloadDir
-		fmt.Println("♻️ Dùng lại thư mục chưa có file: " + finalDir)
-	} else {
-		lastDownloadKey = downloadKey
-		lastDownloadDir = finalDir
-	}
-	downloadDirMu.Unlock()
-
 	// Tự động tạo thư mục (Quan trọng)
 	// Giúp Bot không bị crash nếu thư mục truyền vào chưa có trên ổ cứng
 	err := os.MkdirAll(finalDir, os.ModePerm)
@@ -341,6 +307,11 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 
 		// Gọi hàm cào đa trang của Thắng
 		h.Crawler.CrawlAllPages()
+
+		// Thư mục của lượt tải này nếu rỗng (lỗi/dừng/không có file) thì xóa. os.Remove chỉ xóa được thư mục RỖNG, không bao giờ xóa file.
+		if errRm := os.Remove(finalDir); errRm == nil {
+			fmt.Printf("🧹 Đã xóa thư mục rỗng: %s\n", finalDir)
+		}
 
 		fmt.Println("🏁 Hệ thống đã hoàn thành toàn bộ hóa đơn!")
 	}()
