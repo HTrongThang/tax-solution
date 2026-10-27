@@ -1432,9 +1432,14 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 		// --- 4. CHUYỂN TRANG ---
 		// Nếu đã thu thập đủ tổng số hóa đơn báo trên trang thuế -> Dừng
+		// Đã đủ số hóa đơn thuế báo → chỉ dừng khi ô "N / M" khớp (đã ở trang cuối) hoặc không đọc được ô này
 		if totalOnTax > 0 && len(allInvoices) >= totalOnTax {
-			fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn. Dừng chuyển trang!\n", len(allInvoices), totalOnTax)
-			break
+			cp, tp := c.pagerPos()
+			if tp == 0 || cp >= tp {
+				fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn (trang %d/%d). Dừng chuyển trang!\n", len(allInvoices), totalOnTax, cp, tp)
+				break
+			}
+			fmt.Printf("ℹ️ Đã đủ %d/%d hóa đơn nhưng ô trang mới %d/%d, tiếp tục sang trang kế để đến trang cuối.\n", len(allInvoices), totalOnTax, cp, tp)
 		}
 
 		// Dừng theo vị trí thật "N / M" trên trang thuế (không dùng biến đếm pageIdx vì có thể lệch khi thuế chậm)
@@ -1460,9 +1465,9 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		if curPos, totPos := c.pagerPos(); totPos > 0 {
 			nextOK := c.goNextPage(curPos, totPos)
 			// Chưa lấy đủ mà không sang được trang: chờ thuế rảnh rồi thử lại (tối đa 3 vòng) trước khi bỏ cuộc
-			for retry := 1; !nextOK && retry <= 3 && ctx.Err() == nil && !c.StopRequested && c.pagerCaptchaErr == nil; retry++ {
-				fmt.Printf("🔁 Chưa sang được trang %d, thử lại lần %d/3 sau 10s...\n", curPos+1, retry)
-				sendStream(ctx, stream, models.StreamData{Status: fmt.Sprintf("⏳ Thuế phản hồi chậm, thử chuyển sang trang %d lại (%d/3)...", curPos+1, retry)})
+			for retry := 1; !nextOK && retry <= 10 && ctx.Err() == nil && !c.StopRequested && c.pagerCaptchaErr == nil; retry++ {
+				fmt.Printf("🔁 Chưa sang được trang %d, thử lại lần %d/10 sau 10s...\n", curPos+1, retry)
+				sendStream(ctx, stream, models.StreamData{Status: fmt.Sprintf("⏳ Thuế phản hồi chậm, thử chuyển sang trang %d lại (%d/10)...", curPos+1, retry)})
 				time.Sleep(10 * time.Second)
 				c.waitTaxIdle(ctx, stream, 60*time.Second)
 				if now, _ := c.pagerPos(); now > curPos {
