@@ -308,11 +308,6 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 		// Gọi hàm cào đa trang của Thắng
 		h.Crawler.CrawlAllPages()
 
-		// Lượt tải không có file nào (lỗi/dừng/không có dữ liệu) → xóa thư mục rỗng. os.Remove chỉ xóa được thư mục rỗng nên không thể mất dữ liệu.
-		if errRm := os.Remove(finalDir); errRm == nil {
-			fmt.Printf("🧹 Đã xóa thư mục rỗng: %s\n", finalDir)
-		}
-
 		fmt.Println("🏁 Hệ thống đã hoàn thành toàn bộ hóa đơn!")
 	}()
 
