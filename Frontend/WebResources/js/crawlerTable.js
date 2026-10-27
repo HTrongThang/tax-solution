@@ -534,7 +534,7 @@ window.openCaptcha = function (captchaBase64, prefilledCode = '') {
                         }
                     }, 700);
                 } else {
-                    window.showAlert?.('Captcha', 'AI đọc chưa đúng nhiều lần, vui lòng kiểm tra và nhập tay.', 'warning');
+                    window.showAlert?.('Captcha', 'Hệ thống đọc chưa đúng nhiều lần, vui lòng kiểm tra và nhập tay.', 'warning');
                 }
             }
         }

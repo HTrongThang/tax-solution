@@ -400,7 +400,7 @@ namespace Frontend.Views
                     var compForLogin = _cachedCompanies?.FirstOrDefault(c => c.Mst == reqMst);
                     if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && await _taxService.GetCaptchaAiEnabledAsync())
                     {
-                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'AI đang tự động nhận diện Captcha và đăng nhập...', 'info');");
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'Hệ thống đang tự động nhận diện Captcha và đăng nhập...', 'info');");
                         await Task.Delay(1000); // chờ modal đăng nhập trên trang thuế render xong
 
                         // Captcha rỗng → Backend Go tự giải bằng AI (thử lại tối đa 3 lần nếu thuế báo sai mã)
@@ -409,7 +409,7 @@ namespace Frontend.Views
                         if (autoStatus == "success")
                         {
                             string safeMst = JsonConvert.ToString(compForLogin.Mst);
-                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (AI tự giải Captcha)!");
+                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (Hệ thống tự giải Captcha)!");
                             _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true, {safeMst}); if(window.showAlert) window.showAlert('Thành công', {safeOkMsg}, 'success'); }})();");
                             break;
                         }
@@ -425,7 +425,7 @@ namespace Frontend.Views
                         }
 
                         // AI không vượt được captcha → mở popup để bạn nhập tay
-                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Captcha', 'AI chưa nhận diện đúng, vui lòng nhập tay.', 'warning');");
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Captcha', 'Hệ thống chưa nhận diện đúng, vui lòng nhập tay.', 'warning');");
                     }
 
                     // Chờ dialog và captcha image trên trang thuế render xong rồi mở popup (AI tự điền sẵn mã gợi ý)
