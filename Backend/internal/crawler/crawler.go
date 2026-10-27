@@ -112,6 +112,10 @@ func (s *CrawlerService) EnsureBrowser() error {
 	}
 	l.Append("--start-maximized")
 
+	// Chrome chặn trang tải nhiều file liên tiếp ("Needs permission to download") → bật sẵn quyền "Tự động tải nhiều file"
+	// cho hồ sơ Chrome của bot để việc tải hàng loạt hóa đơn không bị chặn giữa chừng.
+	l = l.Preferences(`{"profile":{"default_content_setting_values":{"automatic_downloads":1}},"download":{"prompt_for_download":false}}`)
+
 	url, err := l.Launch()
 	if err != nil {
 		return fmt.Errorf("không thể khởi chạy Chrome: %v", err)
@@ -2366,6 +2370,19 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	})
 	time.Sleep(800 * time.Millisecond)
 
+	// [CHẨN ĐOÁN] đếm số dòng đang ở trạng thái "được chọn" trên bảng (nếu >1 nghĩa là chọn dồn nhiều dòng)
+	selectedRowsAtClick := -1
+	_ = rod.Try(func() {
+		r := c.Page.Timeout(3 * time.Second).MustEval(`() => {
+			const panes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active')).filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
+			const root = panes[panes.length - 1] || document;
+			const a = root.querySelectorAll('tr.ant-table-row-selected').length;
+			const b = root.querySelectorAll('tr.ant-table-row input[type=checkbox]:checked').length;
+			return Math.max(a, b);
+		}`)
+		selectedRowsAtClick = r.Int()
+	})
+
 	// --- BƯỚC 2: TÌM VÀ CLICK NÚT TẢI (XML / ZIP) TRÊN TOOLBAR ---
 	var btnDownload *rod.Element
 	_ = rod.Try(func() {
@@ -2507,6 +2524,12 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	}
 
 	// Dùng c.OutputDir đã khởi tạo từ đầu
+	// [CHẨN ĐOÁN] chỉ ghi log, không chặn: đối chiếu XML trong zip với dòng đang xử lý
+	if okMatch, got := zipMatchesRow(latestZip, kyHieuHD, soHD); !okMatch {
+		fmt.Printf("   🧪 [LỆCH] Dòng %d là %s/%s nhưng XML trong zip là %s | số dòng đang được chọn trên bảng lúc bấm tải: %d | zip: %s\n", index+1, kyHieuHD, soHD, got, selectedRowsAtClick, zipEntrySummary(latestZip))
+	} else {
+		fmt.Printf("   🧪 [KHỚP] Dòng %d %s/%s | số dòng đang chọn: %d | zip: %s\n", index+1, kyHieuHD, soHD, selectedRowsAtClick, zipEntrySummary(latestZip))
+	}
 	// Đối chiếu nội dung XML với dòng đang xử lý: tránh lưu nhầm file của hóa đơn khác (thuế đôi khi tải theo dòng đang chọn cũ)
 	if okMatch, got := zipMatchesRow(latestZip, kyHieuHD, soHD); !okMatch {
 		_ = os.Remove(latestZip)

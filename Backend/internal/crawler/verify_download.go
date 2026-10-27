@@ -76,3 +76,31 @@ func zipExt(name string) string {
 	}
 	return ""
 }
+
+// zipEntrySummary: liệt kê file .xml trong zip kèm số HĐ bên trong (phục vụ chẩn đoán khi tên file lệch nội dung).
+func zipEntrySummary(zipPath string) string {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "không mở được zip"
+	}
+	defer r.Close()
+	var parts []string
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() || !strings.EqualFold(zipExt(f.Name), ".xml") {
+			continue
+		}
+		so := "?"
+		if rc, e := f.Open(); e == nil {
+			data, _ := io.ReadAll(io.LimitReader(rc, 4<<20))
+			rc.Close()
+			if m := reXmlSHDon.FindStringSubmatch(string(data)); m != nil {
+				so = m[1]
+			}
+		}
+		parts = append(parts, f.Name+"="+so)
+	}
+	if len(parts) == 0 {
+		return "không có xml"
+	}
+	return strings.Join(parts, "; ")
+}
