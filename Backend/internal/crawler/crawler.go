@@ -1,4 +1,4 @@
-﻿package crawler
+package crawler
 
 import (
 	"TAXSOLUTION/internal/captcha"
@@ -1912,18 +1912,30 @@ func (c *CrawlerService) CrawlAllPages() {
 	if c.pagerCaptchaOn {
 		if cur, total := c.pagerPos(); total > 0 && cur > 1 {
 			fmt.Printf("🔍 Đang ở trang %d/%d → bấm Tìm kiếm lại để về trang 1 (nhanh hơn bấm lùi từng trang).\n", cur, total)
-			if c.clickSearchButton() {
-				if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, searchCaptchaAppearWait); errCap != nil {
-					c.CurrentStatus = "Lỗi"
-					c.logError("captcha tìm kiếm lại về trang 1", errCap, fmt.Sprintf("đang ở trang %d/%d", cur, total))
-					return
+			var lastErr error
+			for try := 1; try <= 8 && !c.StopRequested; try++ {
+				if !c.clickSearchButton() {
+					break
 				}
-				time.Sleep(1500 * time.Millisecond)
-				c.waitNotLoading(60 * time.Second)
+				lastErr = c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, searchCaptchaAppearWait)
+				if lastErr == nil {
+					time.Sleep(1500 * time.Millisecond)
+					c.waitNotLoading(60 * time.Second)
+					break
+				}
+				// Sai captcha → bấm Tìm kiếm lại cho tới khi qua được
+				fmt.Printf("🔁 Captcha chưa qua (%v), bấm Tìm kiếm lại (%d/8)...\n", lastErr, try)
+				time.Sleep(2 * time.Second)
+			}
+			if lastErr != nil && !c.StopRequested {
+				if now, _ := c.pagerPos(); now > 1 {
+					fmt.Println("⚠️ Tìm kiếm lại chưa về được trang 1, chuyển sang bấm lùi từng trang.")
+				}
 			}
 		}
 	}
 
+	backCapFails := 0
 	for guard := 0; guard < 500; guard++ {
 		if c.StopRequested {
 			c.CurrentStatus = "Đã hủy"
@@ -1956,9 +1968,16 @@ func (c *CrawlerService) CrawlAllPages() {
 		}
 		if c.pagerCaptchaOn {
 			if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, pagerCaptchaAppearWait); errCap != nil {
-				c.CurrentStatus = "Lỗi"
-				c.logError("captcha quay về trang 1", errCap, fmt.Sprintf("đang ở trang %d/%d", cur, total))
-				return
+				backCapFails++
+				if backCapFails >= 10 || c.StopRequested {
+					c.CurrentStatus = "Lỗi"
+					c.logError("captcha quay về trang 1", errCap, fmt.Sprintf("đang ở trang %d/%d", cur, total))
+					return
+				}
+				// Sai captcha → bấm lùi lại để cổng thuế hỏi lại
+				fmt.Printf("🔁 Captcha chưa qua (%v), bấm lùi lại (%d/10)...\n", errCap, backCapFails)
+				time.Sleep(2 * time.Second)
+				continue
 			}
 		}
 		c.waitPagerPage(cur-1, 30*time.Second)
@@ -2228,6 +2247,12 @@ func (c *CrawlerService) goNextPage(cur, total int) bool {
 			// MTT: cổng thuế hỏi lại captcha mỗi lần chuyển trang → giải (AI / người dùng) rồi mới chờ đổi trang
 			if c.pagerCaptchaOn {
 				if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, c.pagerCaptchaStream, pagerCaptchaAppearWait); errCap != nil {
+					if c.captchaNoManual && !c.StopRequested {
+						// Tải chi tiết: sai captcha / popup đóng → bấm lại nút > để cổng thuế hỏi lại, bấm cho tới khi qua được
+						fmt.Printf("🔁 Captcha chưa qua (%v), bấm chuyển trang lại...\n", errCap)
+						time.Sleep(2 * time.Second)
+						continue
+					}
 					c.pagerCaptchaErr = errCap
 					return false
 				}
