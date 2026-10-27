@@ -521,6 +521,22 @@ window.openCaptcha = function (captchaBase64, prefilledCode = '') {
                     input.select();
                 }
             }, 200);
+
+            // AI đã điền sẵn mã (chỉ đăng nhập) → tự bấm Xác nhận, tối đa 3 lần liên tiếp để không lặp vô hạn nếu AI đọc sai
+            if (prefilledCode && window._captchaMode !== 'search') {
+                window._aiAutoSubmitCount = (window._aiAutoSubmitCount || 0) + 1;
+                if (window._aiAutoSubmitCount <= 3) {
+                    setTimeout(() => {
+                        const modalEl = document.getElementById('captcha-modal');
+                        const inp = document.getElementById('input-captcha');
+                        if (modalEl && !modalEl.classList.contains('hidden') && inp && inp.value === prefilledCode && !inp.disabled) {
+                            window.submitCaptcha();
+                        }
+                    }, 700);
+                } else {
+                    window.showAlert?.('Captcha', 'AI đọc chưa đúng nhiều lần, vui lòng kiểm tra và nhập tay.', 'warning');
+                }
+            }
         }
     } else {
         window.showAlert('Lỗi', 'Không thể lấy mã Captcha từ hệ thống Thuế!', 'error');
@@ -547,6 +563,7 @@ window.openSearchCaptcha = function (captchaSrc, statusText) {
 
 // Hàm đóng Popup
 window.closeCaptcha = function () {
+    window._aiAutoSubmitCount = 0;
     const modal = document.getElementById('captcha-modal');
     if (modal) {
         modal.classList.add('hidden');
