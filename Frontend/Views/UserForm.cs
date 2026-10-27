@@ -395,6 +395,39 @@ namespace Frontend.Views
                         break;
                     }
 
+                    // Công tắc AI đang BẬT + có MST/mật khẩu → tự động giải captcha và đăng nhập luôn, không hiện popup
+                    string reqMst = packet?.data?.taxCode;
+                    var compForLogin = _cachedCompanies?.FirstOrDefault(c => c.Mst == reqMst);
+                    if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && await _taxService.GetCaptchaAiEnabledAsync())
+                    {
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'AI đang tự động nhận diện Captcha và đăng nhập...', 'info');");
+                        await Task.Delay(1000); // chờ modal đăng nhập trên trang thuế render xong
+
+                        // Captcha rỗng → Backend Go tự giải bằng AI (thử lại tối đa 3 lần nếu thuế báo sai mã)
+                        var (autoStatus, autoMsg) = await _taxService.LoginTax(compForLogin.Mst, compForLogin.Password, "");
+
+                        if (autoStatus == "success")
+                        {
+                            string safeMst = JsonConvert.ToString(compForLogin.Mst);
+                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (AI tự giải Captcha)!");
+                            _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true, {safeMst}); if(window.showAlert) window.showAlert('Thành công', {safeOkMsg}, 'success'); }})();");
+                            break;
+                        }
+
+                        if (autoStatus == "error_credentials" || (autoMsg != null && autoMsg.Contains("SAI_THONG_TIN")))
+                        {
+                            string credMsg = (autoMsg ?? "").Replace("SAI_THONG_TIN:", "").Replace("LOI_DANG_NHAP:", "").Trim();
+                            if (string.IsNullOrEmpty(credMsg)) credMsg = "Tên đăng nhập hoặc mật khẩu không đúng.";
+                            credMsg += " Vui lòng kiểm tra lại mật khẩu doanh nghiệp trong phần mềm!";
+                            string safeCredMsg = JsonConvert.ToString(credMsg);
+                            _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.showAlert) window.showAlert('Sai thông tin', {safeCredMsg}, 'error'); }})();");
+                            break;
+                        }
+
+                        // AI không vượt được captcha → mở popup để bạn nhập tay
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Captcha', 'AI chưa nhận diện đúng, vui lòng nhập tay.', 'warning');");
+                    }
+
                     // Chờ dialog và captcha image trên trang thuế render xong rồi mở popup (AI tự điền sẵn mã gợi ý)
                     await Task.Delay(1500);
                     await LoadCaptchaToUI();
