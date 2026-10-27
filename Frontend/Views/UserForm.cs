@@ -327,6 +327,18 @@ namespace Frontend.Views
                 case "GET_SETTINGS_DATA":
                     await SendSettingsDataToWeb();
                     break;
+                case "SET_CAPTCHA_AI":
+                    try
+                    {
+                        bool wantEnabled = packet.data != null && (bool)packet.data.enabled;
+                        bool nowEnabled = await _taxService.SetCaptchaAiEnabledAsync(wantEnabled);
+                        await ExecuteScriptSerializedAsync($"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(nowEnabled ? "true" : "false")});");
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Lỗi SET_CAPTCHA_AI: " + ex.Message);
+                    }
+                    break;
                 case "SUBMIT_SEARCH_CAPTCHA":
                     try
                     {
@@ -891,6 +903,10 @@ namespace Frontend.Views
                 string jsonData = JsonConvert.SerializeObject(_cachedCompanies ?? new List<CompanyModel>());
                 string safeJson = JsonConvert.ToString(jsonData);
                 await ExecuteScriptSerializedAsync($"window.loadInitialData({safeJson})");
+
+                // Gửi trạng thái công tắc AI giải captcha lên trang Cài đặt
+                bool aiOn = await _taxService.GetCaptchaAiEnabledAsync();
+                await ExecuteScriptSerializedAsync($"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(aiOn ? "true" : "false")});");
             }
             catch (Exception ex)
             {

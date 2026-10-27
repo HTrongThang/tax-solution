@@ -244,3 +244,28 @@ window.deleteAccount = function (mst) {
         }
     );
 };
+
+// ===== Công tắc bật/tắt giải Captcha bằng AI =====
+window.setCaptchaAiToggle = function (enabled) {
+    const toggle = document.getElementById('captcha-ai-toggle');
+    const status = document.getElementById('captcha-ai-status');
+    if (toggle) {
+        toggle.checked = !!enabled;
+        toggle.disabled = false;
+    }
+    if (status) {
+        status.innerText = enabled
+            ? 'Đang BẬT: AI tự nhận diện và điền mã captcha'
+            : 'Đang TẮT: bạn tự nhập mã captcha';
+    }
+};
+
+window.toggleCaptchaAi = function (checkbox) {
+    checkbox.disabled = true; // chờ Backend xác nhận rồi setCaptchaAiToggle sẽ mở lại
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({
+            action: 'SET_CAPTCHA_AI',
+            data: { enabled: checkbox.checked }
+        });
+    }
+};

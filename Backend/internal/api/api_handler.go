@@ -42,7 +42,29 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 		taxRoutes.GET("/showLogin", h.ShowLoginDialog)
 		taxRoutes.POST("/search-captcha", h.SubmitSearchCaptcha)
 		taxRoutes.POST("/search-captcha/refresh", h.RefreshSearchCaptcha)
+		taxRoutes.GET("/captcha-ai", h.GetCaptchaAI)
+		taxRoutes.POST("/captcha-ai", h.SetCaptchaAI)
 	}
+}
+
+// GetCaptchaAI: trả về trạng thái công tắc giải captcha bằng AI.
+func (h *Handler) GetCaptchaAI(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"enabled": captcha.Enabled()})
+}
+
+// SetCaptchaAI: bật/tắt giải captcha bằng AI (lưu vào .env).
+func (h *Handler) SetCaptchaAI(c *gin.Context) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": "Dữ liệu không hợp lệ"})
+		return
+	}
+	if err := captcha.SetEnabled(req.Enabled); err != nil {
+		fmt.Printf("⚠️ Không ghi được .env: %v\n", err)
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "success", "enabled": captcha.Enabled()})
 }
 
 func (h *Handler) InitTaxPage(c *gin.Context) {

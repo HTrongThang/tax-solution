@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -44,12 +45,52 @@ func Enabled() bool {
 	return strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != ""
 }
 
+// envFile là file .env đầu tiên đọc được, dùng để lưu lại công tắc AI khi người dùng đổi trên giao diện.
+var (
+	envFile string
+	envMu   sync.Mutex
+)
+
+// SetEnabled bật/tắt giải captcha bằng AI ngay lập tức và ghi lại vào .env để giữ sau khi khởi động lại.
+func SetEnabled(enabled bool) error {
+	val := "false"
+	if enabled {
+		val = "true"
+	}
+	_ = os.Setenv("CAPTCHA_AI_ENABLED", val)
+
+	envMu.Lock()
+	defer envMu.Unlock()
+	if envFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	found := false
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "CAPTCHA_AI_ENABLED=") {
+			lines[i] = "CAPTCHA_AI_ENABLED=" + val
+			found = true
+		}
+	}
+	if !found {
+		lines = append(lines, "CAPTCHA_AI_ENABLED="+val)
+	}
+	return os.WriteFile(envFile, []byte(strings.Join(lines, "\n")), 0o600)
+}
+
 // LoadEnv đọc các file .env và nạp vào os.Environ nếu chưa được set.
 func LoadEnv(paths ...string) {
 	for _, p := range paths {
 		f, err := os.Open(p)
 		if err != nil {
 			continue
+		}
+		if envFile == "" {
+			envFile = p
 		}
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {

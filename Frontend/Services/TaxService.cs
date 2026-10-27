@@ -33,6 +33,31 @@ namespace Frontend.Services
             return await response.Content.ReadAsStringAsync();
         }
 
+        // Công tắc bật/tắt giải captcha bằng AI (lưu ở Backend/.env)
+        public async Task<bool> GetCaptchaAiEnabledAsync()
+        {
+            try
+            {
+                var content = await _client.GetStringAsync("/api/tax/captcha-ai");
+                dynamic result = JsonConvert.DeserializeObject(content);
+                return (bool)(result?.enabled ?? false);
+            }
+            catch { return false; }
+        }
+
+        public async Task<bool> SetCaptchaAiEnabledAsync(bool enabled)
+        {
+            try
+            {
+                var body = new StringContent(JsonConvert.SerializeObject(new { enabled }), Encoding.UTF8, "application/json");
+                var response = await _client.PostAsync("/api/tax/captcha-ai", body);
+                var content = await response.Content.ReadAsStringAsync();
+                dynamic result = JsonConvert.DeserializeObject(content);
+                return (bool)(result?.enabled ?? enabled);
+            }
+            catch { return !enabled; }
+        }
+
         // Mở dialog đăng nhập trên tab hiện tại (sau logout, không mở tab mới)
         public async Task<(string status, string message)> ShowLoginDialogAsync()
         {
