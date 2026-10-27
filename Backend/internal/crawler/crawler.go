@@ -44,6 +44,9 @@ type CrawlerService struct {
 	pagerCaptchaCtx    context.Context
 	pagerCaptchaStream chan models.StreamData
 	pagerCaptchaErr    error
+
+	// Thời điểm lần tìm kiếm gần nhất có dữ liệu (để nghỉ 5s trước khi chuyển tab)
+	lastDataAt time.Time
 }
 
 // logError: Ghi lỗi 1 dòng vào %AppData%\TaxSolution\logs\error.log
@@ -351,7 +354,7 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if isAutoSolve && attempt > 1 {
-			fmt.Printf("🔄 [AI Login] Thử lại lần %d/%d (lấy mã captcha mới và giải lại)...\n", attempt, maxAttempts)
+			fmt.Printf("🔄 [Hệ thống Login] Thử lại lần %d/%d (lấy mã captcha mới và giải lại)...\n", attempt, maxAttempts)
 			time.Sleep(1 * time.Second)
 		}
 
@@ -696,6 +699,18 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 	} else {
 		fmt.Println("📄 Đã ở trang Tra cứu, bỏ qua điều hướng.")
+	}
+
+	// Lần tìm kiếm trước có dữ liệu → nghỉ đủ 5s (tính từ lúc có dữ liệu) rồi mới click chuyển tab
+	if !c.lastDataAt.IsZero() {
+		if remain := 5*time.Second - time.Since(c.lastDataAt); remain > 0 {
+			if stream != nil {
+				stream <- models.StreamData{Status: "⏳ Nghỉ vài giây trước khi chuyển tab...", IsDone: false}
+			}
+			fmt.Printf("⏳ Nghỉ %.1fs trước khi chuyển tab...\n", remain.Seconds())
+			time.Sleep(remain)
+		}
+		c.lastDataAt = time.Time{}
 	}
 
 	// --- 1.1. CHỌN TAB CHIỀU HÓA ĐƠN (BÁN RA / MUA VÀO) ---
@@ -1591,6 +1606,9 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	}
 
 	// 5. KẾT THÚC
+	if len(allInvoices) > 0 {
+		c.lastDataAt = time.Now()
+	}
 	if stream != nil {
 		stream <- models.StreamData{
 			Invoices:   allInvoices,
