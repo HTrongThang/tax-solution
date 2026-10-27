@@ -162,6 +162,11 @@ func (c *CrawlerService) handleSearchCaptcha(ctx context.Context, stream chan mo
 			// Cổng thuế đóng popup nhưng báo sai mã → không thể nhập lại trên popup cũ
 			return fmt.Errorf("cổng thuế báo: %s. Vui lòng tìm kiếm lại", errMsg)
 		}
+		if errMsg == "" {
+			// Không có lỗi sai captcha rõ ràng, chỉ là popup chưa đóng kịp → KHÔNG gửi lại (tránh bấm Xác nhận/Tìm kiếm lần nữa), để các bước sau tự chờ dữ liệu
+			fmt.Println("⏳ Popup captcha chưa đóng nhưng không có lỗi, tiếp tục chờ dữ liệu, không gửi lại mã.")
+			return nil
+		}
 
 		fmt.Printf("⚠️ Captcha sai (lần %d/%d): %s\n", attempt, searchCaptchaMaxAttempts, errMsg)
 		status = "⚠️ Mã captcha không đúng, vui lòng nhập lại."
@@ -250,8 +255,8 @@ func (c *CrawlerService) submitSearchCaptchaCode(code string) (ok bool, closed b
 		return false, false, "không điền được mã captcha"
 	}
 
-	// Chờ popup đóng (đúng) hoặc cổng thuế báo lỗi (sai)
-	deadline := time.Now().Add(6 * time.Second)
+	// Chờ popup đóng (đúng) hoặc cổng thuế báo lỗi (sai). Cổng thuế có thể chậm, nên chờ lâu hơn để không nhầm là sai mã rồi gửi lại.
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(300 * time.Millisecond)
 

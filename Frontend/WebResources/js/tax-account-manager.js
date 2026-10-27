@@ -255,7 +255,7 @@ window.setCaptchaAiToggle = function (enabled) {
     }
     if (status) {
         status.innerText = enabled
-            ? 'Đang BẬT: AI tự nhận diện và điền mã captcha'
+            ? 'Đang BẬT: Tự nhận diện và điền mã captcha'
             : 'Đang TẮT: bạn tự nhập mã captcha';
     }
 };
