@@ -22,6 +22,7 @@ import (
 const (
 	searchCaptchaMarker      = "data-search-captcha"
 	searchCaptchaAppearWait  = 6 * time.Second // chờ popup xuất hiện sau khi bấm Tìm kiếm
+	pagerCaptchaAppearWait   = 4 * time.Second // chờ popup xuất hiện sau khi bấm chuyển trang
 	searchCaptchaUserTimeout = 5 * time.Minute // tối đa chờ người dùng nhập mỗi lần
 	searchCaptchaMaxAttempts = 5               // số lần nhập sai tối đa
 	searchCaptchaKeepAlive   = 30 * time.Second
@@ -107,7 +108,12 @@ func sendStream(ctx context.Context, stream chan models.StreamData, data models.
 // handleSearchCaptcha: gọi ngay sau khi bấm Tìm kiếm (chỉ với hóa đơn MTT).
 // Trả về nil khi không có popup hoặc đã nhập đúng; trả về lỗi khi người dùng hủy / hết giờ / sai quá số lần.
 func (c *CrawlerService) handleSearchCaptcha(ctx context.Context, stream chan models.StreamData) error {
-	if !c.waitSearchCaptchaModal(ctx, searchCaptchaAppearWait) {
+	return c.handleSearchCaptchaWait(ctx, stream, searchCaptchaAppearWait)
+}
+
+// handleSearchCaptchaWait: như handleSearchCaptcha nhưng cho chọn thời gian chờ popup xuất hiện (dùng khi chuyển trang).
+func (c *CrawlerService) handleSearchCaptchaWait(ctx context.Context, stream chan models.StreamData, appearWait time.Duration) error {
+	if !c.waitSearchCaptchaModal(ctx, appearWait) {
 		if ctx.Err() != nil || c.StopRequested {
 			return errors.New("thao tác đã bị hủy")
 		}

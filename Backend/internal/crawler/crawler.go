@@ -38,6 +38,12 @@ type CrawlerService struct {
 	// Captcha khi tìm kiếm hóa đơn MTT: kênh nhận mã người dùng nhập (nil = không có captcha đang chờ)
 	searchCaptchaMu sync.Mutex
 	searchCaptchaCh chan string
+
+	// Captcha khi chuyển trang (MTT)
+	pagerCaptchaOn     bool
+	pagerCaptchaCtx    context.Context
+	pagerCaptchaStream chan models.StreamData
+	pagerCaptchaErr    error
 }
 
 // logError: Ghi lỗi 1 dòng vào %AppData%\TaxSolution\logs\error.log
@@ -627,6 +633,13 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 		c.Page = c.Browser.MustPage()
 	}
+
+	// MTT: bật xử lý captcha mỗi lần chuyển trang trong suốt lượt tra cứu này
+	c.pagerCaptchaOn = category == "may_tinh_tien"
+	c.pagerCaptchaCtx = ctx
+	c.pagerCaptchaStream = stream
+	c.pagerCaptchaErr = nil
+	defer func() { c.pagerCaptchaOn = false; c.pagerCaptchaStream = nil }()
 
 	var allInvoices []models.Invoice
 	seen := make(map[string]bool)
@@ -1423,6 +1436,14 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 					c.CurrentStatus = "Đã hủy"
 					return allInvoices, fmt.Errorf("thao tác đã bị hủy")
 				}
+				if c.pagerCaptchaErr != nil {
+					errCap := c.pagerCaptchaErr
+					c.CurrentStatus = "Lỗi"
+					if stream != nil {
+						stream <- models.StreamData{Status: "❌ " + errCap.Error(), IsDone: true}
+					}
+					return allInvoices, errCap
+				}
 				fmt.Printf("⚠️ Thuế không chuyển được sang trang %d (đang kẹt ở %d/%d). Dừng để tránh trang ảo!\n", curPos+1, curPos, totPos)
 				c.logError("chuyển trang", fmt.Errorf("không chuyển được sang trang %d", curPos+1), fmt.Sprintf("đã lấy %d/%d hóa đơn", len(allInvoices), totalOnTax))
 				if stream != nil {
@@ -2115,6 +2136,13 @@ func (c *CrawlerService) goNextPage(cur, total int) bool {
 		if c.clickPagerOpt("right", force) {
 			if force {
 				fmt.Println("⚠️ Nút > của thuế bị khóa, đã ép gỡ khóa và bấm.")
+			}
+			// MTT: cổng thuế hỏi lại captcha mỗi lần chuyển trang → giải (AI / người dùng) rồi mới chờ đổi trang
+			if c.pagerCaptchaOn {
+				if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, c.pagerCaptchaStream, pagerCaptchaAppearWait); errCap != nil {
+					c.pagerCaptchaErr = errCap
+					return false
+				}
 			}
 			if c.waitPagerPage(cur+1, 25*time.Second) {
 				return true
