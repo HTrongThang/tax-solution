@@ -1,4 +1,4 @@
-package crawler
+﻿package crawler
 
 import (
 	"TAXSOLUTION/internal/captcha"
@@ -1907,6 +1907,22 @@ func (c *CrawlerService) CrawlAllPages() {
 	// BẮT BUỘC quay về trang 1 trước khi tải chi tiết (dù người dùng đang đứng ở trang nào)
 	c.CurrentStatus = "Đang quay về trang đầu tiên..."
 	fmt.Println("⏮️ Đang reset về trang 1 bằng nút mũi tên trái...")
+
+	// MTT: mỗi lần bấm lùi đều dính captcha → bấm Tìm kiếm lại 1 lần (chỉ 1 captcha, tự về trang 1) cho nhanh
+	if c.pagerCaptchaOn {
+		if cur, total := c.pagerPos(); total > 0 && cur > 1 {
+			fmt.Printf("🔍 Đang ở trang %d/%d → bấm Tìm kiếm lại để về trang 1 (nhanh hơn bấm lùi từng trang).\n", cur, total)
+			if c.clickSearchButton() {
+				if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, searchCaptchaAppearWait); errCap != nil {
+					c.CurrentStatus = "Lỗi"
+					c.logError("captcha tìm kiếm lại về trang 1", errCap, fmt.Sprintf("đang ở trang %d/%d", cur, total))
+					return
+				}
+				time.Sleep(1500 * time.Millisecond)
+				c.waitNotLoading(60 * time.Second)
+			}
+		}
+	}
 
 	for guard := 0; guard < 500; guard++ {
 		if c.StopRequested {

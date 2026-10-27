@@ -384,3 +384,24 @@ func (c *CrawlerService) RefreshSearchCaptcha() (string, error) {
 	}
 	return c.captureSearchCaptcha()
 }
+
+// clickSearchButton: bấm nút "Tìm kiếm" trong tab đang active (dùng để quay về trang 1 nhanh khi tải chi tiết).
+func (c *CrawlerService) clickSearchButton() bool {
+	clicked := false
+	_ = rod.Try(func() {
+		res := c.Page.Timeout(5 * time.Second).MustEval(`() => {
+			const buttons = Array.from(document.querySelectorAll("button[type='submit'], button.ant-btn-primary, button"));
+			const active = buttons.filter(b => !b.closest('.ant-tabs-tabpane-inactive'));
+			const btn = active.find(b => (b.innerText || '').trim().includes('Tìm kiếm'));
+			if (!btn) return false;
+			btn.scrollIntoView({ block: 'center', inline: 'center' });
+			btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+			btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+			btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+			btn.click();
+			return true;
+		}`)
+		clicked = res.Bool()
+	})
+	return clicked
+}
