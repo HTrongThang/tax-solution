@@ -2038,6 +2038,28 @@ func (c *CrawlerService) CrawlAllPages() {
 			break
 		}
 
+		downloadRow := func(i int, row *rod.Element) error {
+			// Hệ thống thuế hay chậm/lỗi: thử lại tối đa 3 lần, mỗi lần chờ trang thuế rảnh rồi mới tải
+			var err error
+			for attempt := 1; attempt <= 3; attempt++ {
+				if c.StopRequested {
+					return fmt.Errorf("tiến trình đã bị người dùng dừng")
+				}
+				c.waitNotLoading(45 * time.Second)
+				err = c.ProcessDownloadInvoice(row, i)
+				if err == nil {
+					return nil
+				}
+				fmt.Printf("   ⚠️ Dòng %d lỗi (lần %d/3): %v\n", i+1, attempt, err)
+				if attempt < 3 {
+					c.CurrentStatus = fmt.Sprintf("Hệ thống thuế phản hồi chậm, đang thử lại (%d/3)...", attempt+1)
+					time.Sleep(3 * time.Second)
+				}
+			}
+			return err
+		}
+
+		var failedIdx []int
 		for i, row := range rows {
 			if c.StopRequested {
 				c.CurrentStatus = "Đã hủy"
@@ -2048,32 +2070,45 @@ func (c *CrawlerService) CrawlAllPages() {
 			c.CurrentStatus = fmt.Sprintf("Trang %d: Đang tải dòng %d/%d", page, i+1, len(rows))
 			fmt.Printf("   🔍 %s...\n", c.CurrentStatus)
 
-			// Hệ thống thuế hay chậm/lỗi: thử lại tối đa 3 lần, mỗi lần chờ trang thuế rảnh rồi mới tải
-			var err error
-			for attempt := 1; attempt <= 3; attempt++ {
-				if c.StopRequested {
-					err = fmt.Errorf("tiến trình đã bị người dùng dừng")
-					break
-				}
-				c.waitNotLoading(45 * time.Second)
-				err = c.ProcessDownloadInvoice(row, i)
-				if err == nil {
-					break
-				}
-				fmt.Printf("   ⚠️ Dòng %d lỗi (lần %d/3): %v\n", i+1, attempt, err)
-				if attempt < 3 {
-					c.CurrentStatus = fmt.Sprintf("Hệ thống thuế phản hồi chậm, đang thử lại (%d/3)...", attempt+1)
-					time.Sleep(3 * time.Second)
-				}
-			}
-			if err != nil {
-				fmt.Printf("   ❌ Lỗi tại dòng %d sau 3 lần thử: %v\n", i+1, err)
+			if err := downloadRow(i, row); err != nil {
+				fmt.Printf("   ❌ Lỗi tại dòng %d sau 3 lần thử: %v → sẽ thử lại sau khi hết trang\n", i+1, err)
 				c.logError("tải chi tiết hóa đơn", err, fmt.Sprintf("trang %d, dòng %d/%d", page, i+1, len(rows)))
-				continue // Bỏ qua dòng này, làm dòng tiếp theo
+				failedIdx = append(failedIdx, i)
+				continue
 			}
 
 			// Tải xong 1 dòng thì tăng biến đếm tổng
 			c.TotalInvoices++
+		}
+
+		// Các dòng lỗi KHÔNG bỏ qua: chờ thuế hồi phục rồi tải lại (tối đa 4 vòng) trước khi sang trang
+		for round := 1; round <= 4 && len(failedIdx) > 0 && !c.StopRequested; round++ {
+			fmt.Printf("🔁 Trang %d còn %d dòng chưa tải được, thử lại vòng %d/4 sau %ds...\n", page, len(failedIdx), round, round*10)
+			c.CurrentStatus = fmt.Sprintf("Trang %d: thử lại %d dòng lỗi (vòng %d/4)...", page, len(failedIdx), round)
+			time.Sleep(time.Duration(round*10) * time.Second)
+			c.waitNotLoading(60 * time.Second)
+
+			var stillFailed []int
+			for _, i := range failedIdx {
+				if c.StopRequested {
+					break
+				}
+				if err := downloadRow(i, rows[i]); err != nil {
+					stillFailed = append(stillFailed, i)
+					continue
+				}
+				fmt.Printf("   ✅ Dòng %d đã tải được ở vòng thử lại %d.\n", i+1, round)
+				c.TotalInvoices++
+			}
+			failedIdx = stillFailed
+		}
+		if len(failedIdx) > 0 && !c.StopRequested {
+			nums := make([]string, 0, len(failedIdx))
+			for _, i := range failedIdx {
+				nums = append(nums, strconv.Itoa(i+1))
+			}
+			fmt.Printf("❌ Trang %d vẫn còn %d dòng không tải được: %s\n", page, len(failedIdx), strings.Join(nums, ", "))
+			c.logError("tải chi tiết hóa đơn", fmt.Errorf("thiếu %d dòng", len(failedIdx)), fmt.Sprintf("trang %d, các dòng: %s", page, strings.Join(nums, ", ")))
 		}
 
 		// Chuyển sang trang kế tiếp bằng nút > cạnh ô "N / M"
@@ -2472,6 +2507,13 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	}
 
 	// Dùng c.OutputDir đã khởi tạo từ đầu
+	// Đối chiếu nội dung XML với dòng đang xử lý: tránh lưu nhầm file của hóa đơn khác (thuế đôi khi tải theo dòng đang chọn cũ)
+	if okMatch, got := zipMatchesRow(latestZip, kyHieuHD, soHD); !okMatch {
+		_ = os.Remove(latestZip)
+		fmt.Printf("   ⚠️ File tải về là hóa đơn %s, nhưng dòng %d là %s/%s → bỏ file, tải lại\n", got, index+1, kyHieuHD, soHD)
+		return fmt.Errorf("file tải về không khớp dòng %d (cần %s/%s, nhận %s)", index+1, kyHieuHD, soHD, got)
+	}
+
 	err = c.ExtractAndMove(latestZip, c.OutputDir, fileName)
 
 	if err != nil {
