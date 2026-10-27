@@ -1438,7 +1438,14 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 
 		// Dừng theo vị trí thật "N / M" trên trang thuế (không dùng biến đếm pageIdx vì có thể lệch khi thuế chậm)
-		if curPos, totPos := c.pagerPos(); totPos > 0 {
+		curPos, totPos := c.pagerPos()
+		// Chưa lấy đủ số hóa đơn mà thấy "trang cuối" → đọc lại vị trí (thuế đang loading có thể hiển thị sai) trước khi kết luận
+		for v := 0; v < 3 && totalOnTax > 0 && len(allInvoices) < totalOnTax && (totPos == 0 || curPos >= totPos) && ctx.Err() == nil && !c.StopRequested; v++ {
+			c.waitTaxIdle(ctx, stream, 30*time.Second)
+			time.Sleep(3 * time.Second)
+			curPos, totPos = c.pagerPos()
+		}
+		if totPos > 0 {
 			if curPos >= totPos {
 				fmt.Printf("🏁 Đã đến trang cuối %d/%d.\n", curPos, totPos)
 				break
@@ -1451,7 +1458,20 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		// Ưu tiên: bấm nút > bằng CLICK CHUỘT THẬT và xác nhận ô "N / M" đã đổi trang thật.
 		// Nếu thuế không chuyển trang -> dừng an toàn, không đếm trang ảo.
 		if curPos, totPos := c.pagerPos(); totPos > 0 {
-			if !c.goNextPage(curPos, totPos) {
+			nextOK := c.goNextPage(curPos, totPos)
+			// Chưa lấy đủ mà không sang được trang: chờ thuế rảnh rồi thử lại (tối đa 3 vòng) trước khi bỏ cuộc
+			for retry := 1; !nextOK && retry <= 3 && ctx.Err() == nil && !c.StopRequested && c.pagerCaptchaErr == nil; retry++ {
+				fmt.Printf("🔁 Chưa sang được trang %d, thử lại lần %d/3 sau 10s...\n", curPos+1, retry)
+				sendStream(ctx, stream, models.StreamData{Status: fmt.Sprintf("⏳ Thuế phản hồi chậm, thử chuyển sang trang %d lại (%d/3)...", curPos+1, retry)})
+				time.Sleep(10 * time.Second)
+				c.waitTaxIdle(ctx, stream, 60*time.Second)
+				if now, _ := c.pagerPos(); now > curPos {
+					nextOK = true
+					break
+				}
+				nextOK = c.goNextPage(curPos, totPos)
+			}
+			if !nextOK {
 				if ctx.Err() != nil || c.StopRequested {
 					c.CurrentStatus = "Đã hủy"
 					return allInvoices, fmt.Errorf("thao tác đã bị hủy")
@@ -1611,13 +1631,18 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	}
 
 	// 5. KẾT THÚC
+	finalStatus := "✅ Hoàn thành tra cứu!"
+	if totalOnTax > 0 && len(allInvoices) < totalOnTax {
+		finalStatus = fmt.Sprintf("⚠️ Chưa lấy hết: mới có %d/%d hóa đơn. Vui lòng tìm kiếm lại để lấy đủ", len(allInvoices), totalOnTax)
+		fmt.Println(finalStatus)
+	}
 	if len(allInvoices) > 0 {
 		c.lastDataAt = time.Now()
 	}
 	if stream != nil {
 		stream <- models.StreamData{
 			Invoices:   allInvoices,
-			Status:     "✅ Hoàn thành tra cứu!",
+			Status:     finalStatus,
 			TotalSoFar: c.TotalInvoices,
 			TotalOnTax: totalOnTax,
 			IsDone:     true,
