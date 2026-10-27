@@ -7,9 +7,10 @@ type LoginRequest struct {
 }
 
 type Response struct {
-	Status  string      `json:"status"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Status      string      `json:"status"`
+	Message     string      `json:"message"`
+	Data        interface{} `json:"data,omitempty"`
+	CaptchaCode string      `json:"captcha_code,omitempty"`
 }
 type Invoice struct {
 	STT              string `json:"stt"`                 // Cột 0
@@ -32,9 +33,10 @@ type Invoice struct {
 	ThongTinLienQuan string `json:"thong_tin_lien_quan"` // Cột 17
 }
 type CrawlResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	TaskID  string `json:"task_id,omitempty"`
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+	TaskID    string `json:"task_id,omitempty"`
+	OutputDir string `json:"output_dir,omitempty"`
 }
 
 type StreamData struct {
@@ -44,4 +46,7 @@ type StreamData struct {
 	TotalOnTax  int       `json:"total_on_tax"`
 	Status      string    `json:"status"`  // Text hiển thị cho user
 	IsDone      bool      `json:"is_done"` // Đã xong hết chưa?
+	// Captcha: ảnh captcha (data URL) khi cổng thuế yêu cầu nhập mã lúc tìm kiếm (hóa đơn MTT).
+	// Khác rỗng nghĩa là app cần mở popup nhập captcha.
+	Captcha string `json:"captcha,omitempty"`
 }

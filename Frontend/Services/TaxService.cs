@@ -55,7 +55,7 @@ namespace Frontend.Services
             }
         }
 
-        public async Task<string> GetCaptchaBase64()
+        public async Task<(string Base64, string Code)> GetCaptchaWithAiCode()
         {
             try
             {
@@ -67,28 +67,72 @@ namespace Frontend.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     System.Diagnostics.Debug.WriteLine($"GetCaptcha lỗi {response.StatusCode}: {content}");
-                    return null;
+                    return (null, null);
                 }
 
                 // 2. Parse dùng Newtonsoft
                 dynamic result = JsonConvert.DeserializeObject<dynamic>(content);
 
-                // 3. Kiểm tra và trả về
+                // 3. Kiểm tra và trả về ảnh base64 và mã AI đã giải trước (nếu có)
                 if (result != null && (result.status == "success" || result.Status == "success"))
                 {
-                    return result.data ?? result.Data;
+                    string img = (string)(result.data ?? result.Data);
+                    string code = (string)(result.captcha_code ?? result.CaptchaCode ?? "");
+                    return (img, code);
                 }
                 else
                 {
                     string msg = result?.message ?? "Lỗi không xác định từ Backend";
                     System.Diagnostics.Debug.WriteLine("GetCaptcha: " + msg);
-                    return null;
+                    return (null, null);
                 }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("Lỗi GetCaptcha: " + ex.Message);
-                return null;
+                return (null, null);
+            }
+        }
+
+        public async Task<string> GetCaptchaBase64()
+        {
+            var (img, _) = await GetCaptchaWithAiCode();
+            return img;
+        }
+
+        // Gửi mã captcha người dùng nhập cho lần tìm kiếm hóa đơn MTT đang chờ
+        public async Task<(bool Success, string Message)> SubmitSearchCaptchaAsync(string code)
+        {
+            try
+            {
+                var body = new StringContent(JsonConvert.SerializeObject(new { code }), Encoding.UTF8, "application/json");
+                var response = await _client.PostAsync("/api/tax/search-captcha", body);
+                var content = await response.Content.ReadAsStringAsync();
+                dynamic result = JsonConvert.DeserializeObject(content);
+                string message = result?.message?.ToString() ?? "";
+                return (response.IsSuccessStatusCode, message);
+            }
+            catch (Exception ex)
+            {
+                return (false, "Lỗi kết nối: " + ex.Message);
+            }
+        }
+
+        // Bấm "đổi mã" trên popup captcha tìm kiếm của cổng thuế, trả về ảnh mới (data URL) hoặc null
+        public async Task<(string Image, string Message)> RefreshSearchCaptchaAsync()
+        {
+            try
+            {
+                var response = await _client.PostAsync("/api/tax/search-captcha/refresh", null);
+                var content = await response.Content.ReadAsStringAsync();
+                dynamic result = JsonConvert.DeserializeObject(content);
+                if (response.IsSuccessStatusCode)
+                    return (result?.data?.ToString(), "");
+                return (null, result?.message?.ToString() ?? "Không đổi được mã captcha");
+            }
+            catch (Exception ex)
+            {
+                return (null, "Lỗi kết nối: " + ex.Message);
             }
         }
 

@@ -1,8 +1,11 @@
 package api
 
 import (
+	"TAXSOLUTION/internal/captcha"
 	"TAXSOLUTION/internal/crawler"
 	"TAXSOLUTION/internal/models"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,6 +40,8 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 		taxRoutes.POST("/shutdown", h.ShutdownTax)
 		taxRoutes.POST("/stop", h.StopTax)
 		taxRoutes.GET("/showLogin", h.ShowLoginDialog)
+		taxRoutes.POST("/search-captcha", h.SubmitSearchCaptcha)
+		taxRoutes.POST("/search-captcha/refresh", h.RefreshSearchCaptcha)
 	}
 }
 
@@ -69,8 +74,7 @@ func (h *Handler) ShowLoginDialog(c *gin.Context) {
 }
 
 func (h *Handler) GetCaptcha(c *gin.Context) {
-	// 1. Gọi hàm Crawler của Thu
-	// Biến base64Data sẽ nhận giá trị "encoded" mà hàm GetCaptcha trả về
+	// 1. Gọi hàm Crawler
 	base64Data, err := h.Crawler.GetCaptcha()
 
 	if err != nil {
@@ -81,12 +85,30 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 		return
 	}
 
-	// 2. Trả về cho .NET
-	// Thu bỏ base64Data vào trường Data của model Response
+	// 2. Tự động nhận diện trước bằng Gemini AI nếu có thể
+	var aiCode string
+	cleanBase64 := base64Data
+	if idx := strings.Index(cleanBase64, ","); idx != -1 {
+		cleanBase64 = cleanBase64[idx+1:]
+	}
+	if imgBytes, errDec := base64.StdEncoding.DecodeString(cleanBase64); errDec == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		solved, errSolve := captcha.SolveCaptchaImage(ctx, imgBytes)
+		cancel()
+		if errSolve == nil && len(solved) == 6 {
+			aiCode = solved
+			fmt.Printf("🤖 [GetCaptcha] AI đã giải trước mã: %s\n", aiCode)
+		} else {
+			fmt.Printf("⚠️ [GetCaptcha] AI chưa giải được mã: %v\n", errSolve)
+		}
+	}
+
+	// 3. Trả về cho FE (kèm CaptchaCode để prefill nếu FE cần)
 	c.JSON(http.StatusOK, models.Response{
-		Status:  "success",
-		Message: "Đã lấy mã captcha thành công!",
-		Data:    base64Data, // .NET sẽ đọc cái này để hiện ảnh lên PictureBox
+		Status:      "success",
+		Message:     "Đã lấy mã captcha thành công!",
+		Data:        base64Data,
+		CaptchaCode: aiCode,
 	})
 }
 func (h *Handler) LoginTax(c *gin.Context) {
@@ -260,9 +282,10 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 
 	// 6. Trả lời ngay cho người gọi
 	c.JSON(http.StatusOK, models.CrawlResponse{
-		Status:  "success",
-		Message: "Tiến trình cào dữ liệu đã bắt đầu chạy ngầm.",
-		TaskID:  fmt.Sprintf("TASK_%d", time.Now().Unix()), // Tạo một ID để dễ theo dõi log
+		Status:    "success",
+		Message:   "Tiến trình cào dữ liệu đã bắt đầu chạy ngầm.",
+		TaskID:    fmt.Sprintf("TASK_%d", time.Now().Unix()), // Tạo một ID để dễ theo dõi log
+		OutputDir: finalDir,
 	})
 }
 func (h *Handler) CheckCrawlStatus(c *gin.Context) {

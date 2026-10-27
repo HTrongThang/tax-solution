@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,5 +26,9 @@ namespace Frontend.Models
 
         [JsonProperty("is_done")]
         public bool IsDone { get; set; }
+
+        // Ảnh captcha (data URL) khi cổng thuế yêu cầu nhập mã lúc tìm kiếm hóa đơn MTT
+        [JsonProperty("captcha", NullValueHandling = NullValueHandling.Ignore)]
+        public string Captcha { get; set; }
     }
 }

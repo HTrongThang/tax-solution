@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"TAXSOLUTION/internal/captcha"
 	"TAXSOLUTION/internal/logger"
 	"TAXSOLUTION/internal/models"
 	"archive/zip"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -32,6 +34,10 @@ type CrawlerService struct {
 	CurrentTaxCode     string // Mã số thuế hiện tại
 	CurrentInvoiceType string // Chiều hóa đơn: ban_ra hoặc mua_vao
 	CurrentDateRange   string // Khoảng ngày: vd 01/10/2026-31/10/2026
+
+	// Captcha khi tìm kiếm hóa đơn MTT: kênh nhận mã người dùng nhập (nil = không có captcha đang chờ)
+	searchCaptchaMu sync.Mutex
+	searchCaptchaCh chan string
 }
 
 // logError: Ghi lỗi 1 dòng vào %AppData%\TaxSolution\logs\error.log
@@ -320,7 +326,7 @@ func (s *CrawlerService) GetCaptcha() (string, error) {
 
 	return "", fmt.Errorf("không thể lấy captcha: %v", lastErr)
 }
-func (c *CrawlerService) Login(user, pass, captcha string) error {
+func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 	fmt.Println("🚀 Đang thực hiện đăng nhập (Chế độ kiểm soát nghiêm ngặt)...")
 	c.CurrentTaxCode = strings.TrimSpace(user)
 
@@ -330,83 +336,156 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 		return err
 	}
 
-	// --- 1. ĐIỀN THÔNG TIN ---
-	// Sử dụng MustClick trước khi Input để React nhận diện Focus State
-	c.Page.MustElement(".ant-modal-content #username").MustClick().MustSelectText(".*").MustInput(user)
-	c.Page.MustElement(".ant-modal-content #password").MustClick().MustSelectText(".*").MustInput(pass)
+	isAutoSolve := strings.TrimSpace(manualCaptcha) == ""
+	maxAttempts := 1
+	if isAutoSolve {
+		maxAttempts = 3 // Thử tự động tối đa 3 lần với AI nếu portal báo sai captcha
+	}
 
-	elCap := c.Page.MustElement(".ant-modal-content #cvalue")
-	elCap.MustClick().MustSelectText(".*").MustInput(captcha)
-
-	// Ép React/Ant Design nhận diện sự thay đổi dữ liệu (Trigger Events)
-	c.Page.MustEval(`() => {
-        const ev = { bubbles: true };
-        document.querySelectorAll('.ant-modal-content input').forEach(i => {
-            i.dispatchEvent(new Event('input', ev));
-            i.dispatchEvent(new Event('change', ev));
-        });
-    }`)
-
-	// --- 2. CLICK ĐĂNG NHẬP ---
-	c.Page.MustElement(".ant-modal-content button.ant-btn-primary").MustClick()
-
-	// --- 3. VÒNG LẶP KIỂM TRA (CHỐT KẾT QUẢ) ---
-	fmt.Println("⏳ Đang quét lỗi và trạng thái hệ thống...")
-
-	for i := 0; i < 25; i++ {
-		// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế Thắng gửi)
-		// Check nút Logout (mũi tên phải), icon User, icon Bell
-		hasSuccess, _, _ := c.Page.Has(".anticon-arrow-right, .anticon-user, .anticon-bell")
-
-		// Check URL (Chỉ tin thành công nếu URL chứa domain thuế và KHÔNG chứa chữ login/auth)
-		currURL := c.Page.MustInfo().URL
-		isAuthPage := strings.Contains(strings.ToLower(currURL), "login") || strings.Contains(strings.ToLower(currURL), "auth")
-
-		if hasSuccess && !isAuthPage {
-			fmt.Println("✅ Đăng nhập thành công thực tế!")
-			return nil
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if isAutoSolve && attempt > 1 {
+			fmt.Printf("🔄 [AI Login] Thử lại lần %d/%d (lấy mã captcha mới và giải lại)...\n", attempt, maxAttempts)
+			time.Sleep(1 * time.Second)
 		}
 
-		// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 3 ~ 1 giây để tránh lỗi cũ)
-		if i > 2 {
-			errText, _ := c.Page.Eval(`() => {
-				const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
-				for (const n of notis) {
-					const t = (n.innerText || n.textContent || '').trim();
-					if (t) return t;
-				}
-				return '';
-			}`)
+		// --- 1. ĐIỀN THÔNG TIN ---
+		// Sử dụng MustClick trước khi Input để React nhận diện Focus State
+		c.Page.MustElement(".ant-modal-content #username").MustClick().MustSelectText(".*").MustInput(user)
+		c.Page.MustElement(".ant-modal-content #password").MustClick().MustSelectText(".*").MustInput(pass)
 
-			if errText != nil && errText.Value.String() != "" {
-				msg := errText.Value.String()
-				fmt.Printf("❌ Thất bại xác thực: %s\n", msg)
-				loginErr := parseLoginError(msg)
-				c.logError("loginTax", loginErr, msg)
-				return loginErr
+		// Tự động giải captcha bằng AI nếu chưa có mã hoặc mã rỗng
+		finalCaptcha := strings.TrimSpace(manualCaptcha)
+		if isAutoSolve {
+			fmt.Printf("🤖 [Lần %d] Chưa có mã Captcha, tự động giải bằng Gemini AI...\n", attempt)
+			capBase64, errCap := c.GetCaptcha()
+			if errCap != nil || capBase64 == "" {
+				lastErr = fmt.Errorf("không thể lấy ảnh captcha: %v", errCap)
+				continue
+			}
+
+			cleanCap := capBase64
+			if idx := strings.Index(cleanCap, ","); idx != -1 {
+				cleanCap = cleanCap[idx+1:]
+			}
+
+			imgBytes, errDec := base64.StdEncoding.DecodeString(cleanCap)
+			if errDec != nil {
+				lastErr = fmt.Errorf("không thể decode ảnh captcha: %v", errDec)
+				continue
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			aiCode, aiErr := captcha.SolveCaptchaImage(ctx, imgBytes)
+			cancel()
+
+			if aiErr == nil && len(aiCode) == 6 {
+				fmt.Printf("🤖 Gemini giải captcha đăng nhập thành công: %s\n", aiCode)
+				finalCaptcha = aiCode
+			} else {
+				fmt.Printf("⚠️ Gemini không giải được captcha đăng nhập (lỗi: %v, code: '%s')\n", aiErr, aiCode)
+				lastErr = fmt.Errorf("SAI_CAPTCHA: AI không nhận diện được mã")
+				continue
 			}
 		}
 
-		time.Sleep(300 * time.Millisecond)
-	}
+		elCap := c.Page.MustElement(".ant-modal-content #cvalue")
+		elCap.MustClick().MustSelectText(".*").MustInput(finalCaptcha)
 
-	// --- 4. CHỐT CHẶN CUỐI CÙNG ---
-	// Kiểm tra xem trang có báo lỗi gì còn sót lại không
-	finalErr, _ := c.Page.Eval(`() => {
-		const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
-		for (const n of notis) {
-			const t = (n.innerText || n.textContent || '').trim();
-			if (t) return t;
+		// Ép React/Ant Design nhận diện sự thay đổi dữ liệu (Trigger Events)
+		c.Page.MustEval(`() => {
+			const ev = { bubbles: true };
+			document.querySelectorAll('.ant-modal-content input').forEach(i => {
+				i.dispatchEvent(new Event('input', ev));
+				i.dispatchEvent(new Event('change', ev));
+			});
+		}`)
+
+		// --- 2. CLICK ĐĂNG NHẬP ---
+		c.Page.MustElement(".ant-modal-content button.ant-btn-primary").MustClick()
+
+		// --- 3. VÒNG LẶP KIỂM TRA (CHỐT KẾT QUẢ) ---
+		fmt.Println("⏳ Đang quét lỗi và trạng thái hệ thống...")
+		var iterErr error
+
+		for i := 0; i < 25; i++ {
+			// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế Thắng gửi)
+			// Check nút Logout (mũi tên phải), icon User, icon Bell
+			hasSuccess, _, _ := c.Page.Has(".anticon-arrow-right, .anticon-user, .anticon-bell")
+
+			// Check URL (Chỉ tin thành công nếu URL chứa domain thuế và KHÔNG chứa chữ login/auth)
+			currURL := c.Page.MustInfo().URL
+			isAuthPage := strings.Contains(strings.ToLower(currURL), "login") || strings.Contains(strings.ToLower(currURL), "auth")
+
+			if hasSuccess && !isAuthPage {
+				fmt.Println("✅ Đăng nhập thành công thực tế!")
+				return nil
+			}
+
+			// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 3 ~ 1 giây để tránh lỗi cũ)
+			if i > 2 {
+				errText, _ := c.Page.Eval(`() => {
+					const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
+					for (const n of notis) {
+						const t = (n.innerText || n.textContent || '').trim();
+						if (t) return t;
+					}
+					return '';
+				}`)
+
+				if errText != nil && errText.Value.String() != "" {
+					msg := errText.Value.String()
+					fmt.Printf("❌ Thất bại xác thực: %s\n", msg)
+					iterErr = parseLoginError(msg)
+					break
+				}
+			}
+
+			time.Sleep(300 * time.Millisecond)
 		}
-		return '';
-	}`)
-	if finalErr != nil && finalErr.Value.String() != "" {
-		msg := finalErr.Value.String()
-		loginErr := parseLoginError(msg)
-		c.logError("loginTax", loginErr, msg)
-		return loginErr
+
+		if iterErr != nil {
+			c.logError("loginTax", iterErr, iterErr.Error())
+			if strings.Contains(iterErr.Error(), "SAI_THONG_TIN") {
+				return iterErr
+			}
+			if isAutoSolve && strings.Contains(iterErr.Error(), "SAI_CAPTCHA") {
+				lastErr = iterErr
+				continue
+			}
+			return iterErr
+		}
+
+		// --- 4. CHỐT CHẶN CUỐI CÙNG ---
+		// Kiểm tra xem trang có báo lỗi gì còn sót lại không
+		finalErr, _ := c.Page.Eval(`() => {
+			const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
+			for (const n of notis) {
+				const t = (n.innerText || n.textContent || '').trim();
+				if (t) return t;
+			}
+			return '';
+		}`)
+		if finalErr != nil && finalErr.Value.String() != "" {
+			msg := finalErr.Value.String()
+			loginErr := parseLoginError(msg)
+			c.logError("loginTax", loginErr, msg)
+			if strings.Contains(loginErr.Error(), "SAI_THONG_TIN") {
+				return loginErr
+			}
+			if isAutoSolve && strings.Contains(loginErr.Error(), "SAI_CAPTCHA") {
+				lastErr = loginErr
+				continue
+			}
+			return loginErr
+		}
+
+		lastErr = fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc trang thuế chưa phản hồi")
 	}
 
+	if lastErr != nil {
+		return lastErr
+	}
 	timeoutErr := fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc thông tin đăng nhập không hợp lệ")
 	c.logError("loginTax", timeoutErr, "Quá thời gian chờ đăng nhập")
 	return timeoutErr
@@ -791,6 +870,21 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 			stream <- models.StreamData{Status: "❌ Không thể click nút tìm kiếm", IsDone: true}
 		}
 		return nil, fmt.Errorf("không thể click nút tìm kiếm: %v", err)
+	}
+
+	// Hóa đơn MTT: cổng thuế bắt nhập captcha mỗi lần bấm Tìm kiếm → chờ người dùng nhập trên app
+	if category == "may_tinh_tien" {
+		if errCap := c.handleSearchCaptcha(ctx, stream); errCap != nil {
+			if ctx.Err() != nil || c.StopRequested {
+				c.CurrentStatus = "Đã hủy"
+			} else {
+				c.CurrentStatus = "Lỗi"
+			}
+			if stream != nil {
+				stream <- models.StreamData{Status: "❌ " + errCap.Error(), IsDone: true}
+			}
+			return allInvoices, errCap
+		}
 	}
 
 	// Đợi website thuế xử lý request: chờ spinner xuất hiện rồi biến mất (tối đa 3 phút)

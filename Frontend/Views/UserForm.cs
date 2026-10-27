@@ -28,7 +28,6 @@ namespace Frontend.Views
         // Current crawl request id received from frontend (if any)
         private string _currentCrawlRequestId;
         private string _currentCrawlOutputDir;
-        private bool _crawlFolderIsDedicated; // true khi backend trả về thư mục riêng của lần cào này (an toàn để xóa XML sau khi bóc tách)
         private string _currentCrawlMst;
         private string _currentCrawlInvoiceType;
         // Thêm dòng này để lưu dữ liệu công ty vào RAM
@@ -328,6 +327,46 @@ namespace Frontend.Views
                 case "GET_SETTINGS_DATA":
                     await SendSettingsDataToWeb();
                     break;
+                case "SUBMIT_SEARCH_CAPTCHA":
+                    try
+                    {
+                        string searchCode = packet.data?.captcha != null ? (string)packet.data.captcha : "";
+                        var (okSubmit, submitMsg) = await _taxService.SubmitSearchCaptchaAsync(searchCode?.Trim() ?? "");
+                        if (okSubmit)
+                        {
+                            // Đóng popup; nếu sai mã, Go sẽ gửi ảnh mới qua SSE và popup tự mở lại
+                            await ExecuteScriptSerializedAsync("if(window.closeCaptcha) window.closeCaptcha();");
+                        }
+                        else
+                        {
+                            string safeSubmitMsg = JsonConvert.ToString(string.IsNullOrWhiteSpace(submitMsg) ? "Không gửi được mã captcha" : submitMsg);
+                            await ExecuteScriptSerializedAsync($"(function(){{ const inp = document.getElementById('input-captcha'); if(inp) {{ inp.disabled = false; inp.focus(); }} if(window.showAlert) window.showAlert('Captcha', {safeSubmitMsg}, 'warning'); }})();");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Lỗi SUBMIT_SEARCH_CAPTCHA: " + ex.Message);
+                    }
+                    break;
+                case "REFRESH_SEARCH_CAPTCHA":
+                    try
+                    {
+                        var (newImg, refreshMsg) = await _taxService.RefreshSearchCaptchaAsync();
+                        if (!string.IsNullOrEmpty(newImg) && newImg.StartsWith("data:image/"))
+                        {
+                            await ExecuteScriptSerializedAsync($"if(window.openSearchCaptcha) window.openSearchCaptcha({JsonConvert.ToString(newImg)});");
+                        }
+                        else
+                        {
+                            string safeRefreshMsg = JsonConvert.ToString(string.IsNullOrWhiteSpace(refreshMsg) ? "Không đổi được mã captcha" : refreshMsg);
+                            await ExecuteScriptSerializedAsync($"(function(){{ const img = document.getElementById('img-captcha'); if(img) img.style.opacity = '1'; if(window.showAlert) window.showAlert('Captcha', {safeRefreshMsg}, 'warning'); }})();");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("Lỗi REFRESH_SEARCH_CAPTCHA: " + ex.Message);
+                    }
+                    break;
                 case "REFRESH_CAPTCHA":
                     await LoadCaptchaToUI();
                     break;
@@ -344,7 +383,7 @@ namespace Frontend.Views
                         break;
                     }
 
-                    // Chờ dialog và captcha image trên trang thuế render xong
+                    // Chờ dialog và captcha image trên trang thuế render xong rồi mở popup (AI tự điền sẵn mã gợi ý)
                     await Task.Delay(1500);
                     await LoadCaptchaToUI();
                     break;
@@ -917,26 +956,20 @@ namespace Frontend.Views
 
         private async Task LoadCaptchaToUI()
         {
-            string captchaData = await _taxService.GetCaptchaBase64();
+            var (captchaData, aiCode) = await _taxService.GetCaptchaWithAiCode();
 
             if (!string.IsNullOrEmpty(captchaData))
             {
                 if (!captchaData.StartsWith("data:image"))
                     captchaData = "data:image/png;base64," + captchaData;
 
+                string safeAiCode = JsonConvert.ToString(aiCode ?? "");
+
                 // Lưu ý: Tất cả dấu { và } của JavaScript phải viết thành {{ và }}
                 string jsCommand = $@"
         (function() {{
             if(window.openCaptcha) {{
-                window.openCaptcha('{captchaData}');
-                
-                const input = document.getElementById('input-captcha');
-                if(input) {{
-                    input.value = ''; 
-                    setTimeout(function() {{ 
-                        input.focus(); 
-                    }}, 150);
-                }}
+                window.openCaptcha('{captchaData}', {safeAiCode});
             }}
         }})();";
 
@@ -950,7 +983,6 @@ namespace Frontend.Views
                     "window.showAlert('Lỗi', 'Không lấy được captcha. Vui lòng thử lại!', 'error')"
                 );
             }
-
         }
 
         // Helper: Ensure ExecuteScriptAsync calls are serialized to avoid concurrent execution issues
@@ -1045,7 +1077,6 @@ namespace Frontend.Views
         {
             if (_isCrawling) return;
             _currentCrawlOutputDir = path;
-            _crawlFolderIsDedicated = false;
             _currentCrawlMst = mst;
             _currentCrawlInvoiceType = invoiceType;
             _currentCrawlRequestId = requestId;
@@ -1054,7 +1085,6 @@ namespace Frontend.Views
             if (!string.IsNullOrWhiteSpace(finalOutputDir))
             {
                 _currentCrawlOutputDir = finalOutputDir;
-                _crawlFolderIsDedicated = true;
             }
 
             if (status == "success")
@@ -1117,7 +1147,7 @@ namespace Frontend.Views
                         {
                             TargetMst = _currentCrawlMst,
                             IsMuaVao = _currentCrawlInvoiceType == "mua_vao",
-                            DeleteAfterParsing = _crawlFolderIsDedicated
+                            DeleteAfterParsing = false
                         };
 
                         parseResult = await XmlInvoiceParserService.Instance.ParseDirectoryAsync(
