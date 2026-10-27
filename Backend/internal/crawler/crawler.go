@@ -2370,19 +2370,6 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	})
 	time.Sleep(800 * time.Millisecond)
 
-	// [CHẨN ĐOÁN] đếm số dòng đang ở trạng thái "được chọn" trên bảng (nếu >1 nghĩa là chọn dồn nhiều dòng)
-	selectedRowsAtClick := -1
-	_ = rod.Try(func() {
-		r := c.Page.Timeout(3 * time.Second).MustEval(`() => {
-			const panes = Array.from(document.querySelectorAll('.ant-tabs-tabpane-active')).filter(p => !p.closest('.ant-tabs-tabpane-inactive'));
-			const root = panes[panes.length - 1] || document;
-			const a = root.querySelectorAll('tr.ant-table-row-selected').length;
-			const b = root.querySelectorAll('tr.ant-table-row input[type=checkbox]:checked').length;
-			return Math.max(a, b);
-		}`)
-		selectedRowsAtClick = r.Int()
-	})
-
 	// --- BƯỚC 2: TÌM VÀ CLICK NÚT TẢI (XML / ZIP) TRÊN TOOLBAR ---
 	var btnDownload *rod.Element
 	_ = rod.Try(func() {
@@ -2524,19 +2511,6 @@ func (c *CrawlerService) ProcessDownloadInvoice(row *rod.Element, index int) err
 	}
 
 	// Dùng c.OutputDir đã khởi tạo từ đầu
-	// [CHẨN ĐOÁN] chỉ ghi log, không chặn: đối chiếu XML trong zip với dòng đang xử lý
-	if okMatch, got := zipMatchesRow(latestZip, kyHieuHD, soHD); !okMatch {
-		fmt.Printf("   🧪 [LỆCH] Dòng %d là %s/%s nhưng XML trong zip là %s | số dòng đang được chọn trên bảng lúc bấm tải: %d | zip: %s\n", index+1, kyHieuHD, soHD, got, selectedRowsAtClick, zipEntrySummary(latestZip))
-	} else {
-		fmt.Printf("   🧪 [KHỚP] Dòng %d %s/%s | số dòng đang chọn: %d | zip: %s\n", index+1, kyHieuHD, soHD, selectedRowsAtClick, zipEntrySummary(latestZip))
-	}
-	// Đối chiếu nội dung XML với dòng đang xử lý: tránh lưu nhầm file của hóa đơn khác (thuế đôi khi tải theo dòng đang chọn cũ)
-	if okMatch, got := zipMatchesRow(latestZip, kyHieuHD, soHD); !okMatch {
-		_ = os.Remove(latestZip)
-		fmt.Printf("   ⚠️ File tải về là hóa đơn %s, nhưng dòng %d là %s/%s → bỏ file, tải lại\n", got, index+1, kyHieuHD, soHD)
-		return fmt.Errorf("file tải về không khớp dòng %d (cần %s/%s, nhận %s)", index+1, kyHieuHD, soHD, got)
-	}
-
 	err = c.ExtractAndMove(latestZip, c.OutputDir, fileName)
 
 	if err != nil {
