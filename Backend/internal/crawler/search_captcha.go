@@ -149,6 +149,17 @@ func (c *CrawlerService) handleSearchCaptchaWait(ctx context.Context, stream cha
 		}
 
 		// Nếu AI không giải được hoặc chưa cấu hình API key, rơi về chờ người dùng nhập
+		if !aiSolved && c.captchaNoManual {
+			// Luồng này không có popup nhập tay: đổi mã mới trên cổng thuế rồi giải lại
+			_ = rod.Try(func() {
+				c.Page.Timeout(3 * time.Second).MustElement(fmt.Sprintf("[%s] button.ant-btn-icon-only", searchCaptchaMarker)).MustClick()
+			})
+			time.Sleep(800 * time.Millisecond)
+			if !c.markSearchCaptchaModal() {
+				return nil
+			}
+			continue
+		}
 		if !aiSolved {
 			var errWait error
 			code, errWait = c.waitSearchCaptchaCode(ctx, stream, status, img)

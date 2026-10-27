@@ -128,9 +128,9 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 		cancel()
 		if errSolve == nil && len(solved) == 6 {
 			aiCode = solved
-			fmt.Printf("🤖 [GetCaptcha] AI đã giải trước mã: %s\n", aiCode)
+			fmt.Printf("🤖 [GetCaptcha] Hệ thống đã giải trước mã: %s\n", aiCode)
 		} else {
-			fmt.Printf("⚠️ [GetCaptcha] AI chưa giải được mã: %v\n", errSolve)
+			fmt.Printf("⚠️ [GetCaptcha] Hệ thống chưa giải được mã: %v\n", errSolve)
 		}
 	}
 

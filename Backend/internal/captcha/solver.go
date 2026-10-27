@@ -33,7 +33,7 @@ var fallbackModels = []string{
 var nonAlnum = regexp.MustCompile(`[^A-Z0-9]`)
 
 // ErrDisabled được trả về khi người dùng tắt giải captcha bằng AI.
-var ErrDisabled = errors.New("giải captcha bằng AI đang tắt (CAPTCHA_AI_ENABLED=false)")
+var ErrDisabled = errors.New("giải captcha bằng hệ thống đang tắt (CAPTCHA_AI_ENABLED=false)")
 
 // Enabled cho biết có dùng AI để giải captcha hay không.
 // Bật/tắt bằng CAPTCHA_AI_ENABLED trong .env (mặc định: bật nếu có GEMINI_API_KEY).

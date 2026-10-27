@@ -45,6 +45,10 @@ type CrawlerService struct {
 	pagerCaptchaStream chan models.StreamData
 	pagerCaptchaErr    error
 
+	// Hình thức tra cứu gần nhất (để luồng tải chi tiết biết có cần xử lý captcha MTT) và chế độ chỉ-AI (không có popup nhập tay)
+	searchCategory  string
+	captchaNoManual bool
+
 	// Thời điểm lần tìm kiếm gần nhất có dữ liệu (để nghỉ 5s trước khi chuyển tab)
 	lastDataAt time.Time
 }
@@ -642,6 +646,7 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	c.pagerCaptchaCtx = ctx
 	c.pagerCaptchaStream = stream
 	c.pagerCaptchaErr = nil
+	c.searchCategory = category
 	defer func() { c.pagerCaptchaOn = false; c.pagerCaptchaStream = nil }()
 
 	var allInvoices []models.Invoice
@@ -1845,6 +1850,14 @@ func (c *CrawlerService) CrawlAllPages() {
 	c.CurrentStatus = "Bắt đầu khởi động ứng dụng..."
 	c.GrantPermissions()
 
+	// MTT: cổng thuế hỏi captcha mỗi lần đổi trang (kể cả quay về trang 1) → tự giải bằng AI (luồng này không có popup nhập tay)
+	c.pagerCaptchaErr = nil
+	c.pagerCaptchaOn = c.searchCategory == "may_tinh_tien" && captcha.Enabled()
+	c.pagerCaptchaCtx = context.Background()
+	c.pagerCaptchaStream = nil
+	c.captchaNoManual = c.pagerCaptchaOn
+	defer func() { c.pagerCaptchaOn = false; c.captchaNoManual = false }()
+
 	// Đảm bảo khi hàm kết thúc (xong hoặc lỗi) thì IsRunning phải về false và xóa sạch thư mục tạm
 	defer func() {
 		if r := recover(); r != nil {
@@ -1893,6 +1906,13 @@ func (c *CrawlerService) CrawlAllPages() {
 					fmt.Printf("⚠️ Không bấm được nút lùi ở trang %d.\n", cur)
 					break
 				}
+			}
+		}
+		if c.pagerCaptchaOn {
+			if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, pagerCaptchaAppearWait); errCap != nil {
+				c.CurrentStatus = "Lỗi"
+				c.logError("captcha quay về trang 1", errCap, fmt.Sprintf("đang ở trang %d/%d", cur, total))
+				return
 			}
 		}
 		c.waitPagerPage(cur-1, 30*time.Second)
@@ -2000,6 +2020,10 @@ func (c *CrawlerService) CrawlAllPages() {
 		if !c.goNextPage(cur, total) {
 			if c.StopRequested {
 				break
+			}
+			if c.pagerCaptchaErr != nil {
+				c.CurrentStatus = "Lỗi"
+				c.logError("captcha chuyển trang tải chi tiết", c.pagerCaptchaErr, fmt.Sprintf("đang ở trang %d/%d", cur, total))
 			}
 			fmt.Printf("⚠️ Không chuyển được sang trang %d (nút > của thuế không phản hồi). Dừng để tránh tải trùng!\n", cur+1)
 			c.logError("chuyển trang tải chi tiết", fmt.Errorf("không chuyển được sang trang %d", cur+1), fmt.Sprintf("đang ở trang %d/%d, nút > bị khóa", cur, total))
