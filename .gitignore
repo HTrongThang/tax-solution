@@ -4,5 +4,7 @@ dist/
 *.exe
 output_installer/
 .env
+.env*
 *.env
+*.env*
 __debug_bin*

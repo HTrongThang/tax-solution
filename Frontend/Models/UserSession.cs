@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,8 +8,18 @@ namespace Frontend.Models
 {
     public static class UserSession
     {
-        public static string FullName { get; set; }
-        public static string Role { get; set; }
+        public static string Username { get; set; } = "";
+        public static string FullName { get; set; } = "";
+        public static string Role { get; set; } = "Staff";
+        public static string Status { get; set; } = "ACTIVE";
+
+        // Quyền hạn của tài khoản lấy từ Google Sheet (chỉ giữ trong RAM)
+        public static int MaxTaxAccounts { get; set; } = int.MaxValue;
+        public static bool AllowAI { get; set; } = true;
+        public static string EndDate { get; set; } = "";
+
+        /// <summary>SHA-256 mật khẩu Founder. Chỉ có khi Founder đăng nhập; dùng làm token cấp tài khoản.</summary>
+        public static string AdminToken { get; set; } = "";
 
         /// <summary>
         /// Hàm tự động tạo chữ cái đại diện (ví dụ: Hà Trọng Thắng -> HT)

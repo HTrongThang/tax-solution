@@ -36,6 +36,9 @@ namespace Frontend.Views
         private List<dynamic> _currentInvoicesRAM = new List<dynamic>();
         // Quản lý cơ sở dữ liệu SQLite cục bộ
         private readonly DatabaseService _databaseService = new DatabaseService();
+        private readonly AuthService _authService = new AuthService();
+        private System.Windows.Forms.Timer _sessionCheckTimer;
+        private int _checkingSession = 0;
         // Semaphore để tuần tự hóa các lệnh ExecuteScriptAsync tới WebView2
         private readonly SemaphoreSlim _webviewSemaphore = new SemaphoreSlim(1, 1);
         private bool _isForceClosing = false;
@@ -46,6 +49,9 @@ namespace Frontend.Views
             this.Load += UserForm_Load;
             this.FormClosing += UserForm_FormClosing;
             this.FormClosed += UserForm_FormClosed;
+            _sessionCheckTimer = new System.Windows.Forms.Timer { Interval = 60 * 60 * 1000 }; // 1 tiếng kiểm tra 1 lần xem đã sang ngày mới chưa
+            _sessionCheckTimer.Tick += async (s, e) => await CheckDailyBackgroundAsync(force: false);
+            _sessionCheckTimer.Start();
         }
         private async void UserForm_Load(object sender, EventArgs e)
         {
@@ -139,6 +145,13 @@ namespace Frontend.Views
             // 5. ĐIỀU HƯỚNG (Kiểm tra kỹ chữ User viết hoa/thường)
             // Nếu trong folder là "User" thì giữ nguyên, nếu là "user" thì phải sửa lại
             webViewUser.CoreWebView2.Navigate("https://taxscraper.app/User/dashboard.html");
+
+            // 6. Kiểm tra ngầm định kỳ 1 lần/ngày với Google Sheet (sau khi UI đã sẵn sàng 3 giây)
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                await CheckDailyBackgroundAsync(force: false);
+            });
         }
         private async Task SyncHeaderWithSession()
         {
@@ -238,7 +251,12 @@ namespace Frontend.Views
                         {
                             Mst = packet.data.mst,
                             Password = packet.data.pass,
-                            CompanyName = packet.data.company
+                            CompanyName = packet.data.company,
+                            Address = (string)packet.data.address,
+                            TaxDepartment = (string)packet.data.taxDepartment,
+                            Status = (string)packet.data.status,
+                            OrgType = (string)packet.data.orgType,
+                            Date = DateTime.Now.ToString("dd/MM/yyyy")
                         };
 
                         // 3. CẬP NHẬT RAM: Thêm vào List cache ngay lập tức để sử dụng tức thì
@@ -246,6 +264,15 @@ namespace Frontend.Views
 
                         // Kiểm tra trùng MST để tránh nạp trùng vào RAM
                         var existing = _cachedCompanies.FirstOrDefault(c => c.Mst == newCompany.Mst);
+                        // Nếu thêm mới (không phải cập nhật MST cũ) -> kiểm tra giới hạn MaxTaxAccounts của tài khoản
+                        int maxQuota = UserSession.MaxTaxAccounts;
+                        if (existing == null && maxQuota < int.MaxValue && _cachedCompanies.Count >= maxQuota)
+                        {
+                            string limitMsg = $"Tài khoản của bạn chỉ được lưu tối đa {maxQuota} mã số thuế. Vui lòng xóa bớt hoặc liên hệ Admin nâng cấp.";
+                            await SendSettingsDataToWeb();
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Đã đạt giới hạn MST', {JsonConvert.ToString(limitMsg)}, 'warning')");
+                            break;
+                        }
                         if (existing != null)
                         {
                             _cachedCompanies.Remove(existing); // Nếu trùng thì xóa cũ thay mới
@@ -330,6 +357,11 @@ namespace Frontend.Views
                 case "SET_CAPTCHA_AI":
                     try
                     {
+                        if (!UserSession.AllowAI)
+                        {
+                            await ExecuteScriptSerializedAsync("if(window.setCaptchaAiToggle) window.setCaptchaAiToggle(false, false); if(window.showAlert) window.showAlert('Không có quyền', 'Tài khoản của bạn chưa được cấp quyền sử dụng AI giải Captcha.', 'warning');");
+                            break;
+                        }
                         bool wantEnabled = packet.data != null && (bool)packet.data.enabled;
                         bool nowEnabled = await _taxService.SetCaptchaAiEnabledAsync(wantEnabled);
                         await ExecuteScriptSerializedAsync($"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(nowEnabled ? "true" : "false")});");
@@ -398,9 +430,9 @@ namespace Frontend.Views
                     // Công tắc AI đang BẬT + có MST/mật khẩu → tự động giải captcha và đăng nhập luôn, không hiện popup
                     string reqMst = packet?.data?.taxCode;
                     var compForLogin = _cachedCompanies?.FirstOrDefault(c => c.Mst == reqMst);
-                    if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && await _taxService.GetCaptchaAiEnabledAsync())
+                    if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && UserSession.AllowAI && await _taxService.GetCaptchaAiEnabledAsync())
                     {
-                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'AI đang tự động nhận diện Captcha và đăng nhập...', 'info');");
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'Đang xử lý Captcha và đăng nhập hệ thống...', 'info');");
                         await Task.Delay(1000); // chờ modal đăng nhập trên trang thuế render xong
 
                         // Captcha rỗng → Backend Go tự giải bằng AI (thử lại tối đa 3 lần nếu thuế báo sai mã)
@@ -409,7 +441,7 @@ namespace Frontend.Views
                         if (autoStatus == "success")
                         {
                             string safeMst = JsonConvert.ToString(compForLogin.Mst);
-                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (AI tự giải Captcha)!");
+                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (Hệ thống đang xử lý mã Captcha)!");
                             _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true, {safeMst}); if(window.showAlert) window.showAlert('Thành công', {safeOkMsg}, 'success'); }})();");
                             break;
                         }
@@ -425,7 +457,7 @@ namespace Frontend.Views
                         }
 
                         // AI không vượt được captcha → mở popup để bạn nhập tay
-                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Captcha', 'AI chưa nhận diện đúng, vui lòng nhập tay.', 'warning');");
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Captcha', 'Hệ thống chưa nhận diện đúng, vui lòng nhập tay.', 'warning');");
                     }
 
                     // Chờ dialog và captcha image trên trang thuế render xong rồi mở popup (AI tự điền sẵn mã gợi ý)
@@ -563,6 +595,7 @@ namespace Frontend.Views
                 case "SEARCH_INVOICE":
                     try
                     {
+                        if (!await EnsureAccountValidAsync()) break;
                         string fromDate = packet.data.fromDate;
                         string toDate = packet.data.toDate;
                         string invoiceType = packet.data.invoiceType != null ? (string)packet.data.invoiceType : "ban_ra";
@@ -629,19 +662,36 @@ namespace Frontend.Views
                         // Phải chạy trên UI Thread vì FolderBrowserDialog là thành phần giao diện
                         this.Invoke(new Action(async () =>
                         {
-                            // Tự động lưu vào thư mục Downloads của máy tính, không mở hộp thoại
                             string defaultDownloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
                             if (!Directory.Exists(defaultDownloadsDir))
                             {
                                 defaultDownloadsDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                             }
-                            var response = new
+                            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
                             {
-                                action = "OUTPUT_DIR_SELECTED",
-                                output_dir = defaultDownloadsDir,
-                                requestId = packet.requestId
-                            };
-                            await PostWebMessageAsJson(response);
+                                fbd.Description = "Chọn thư mục để lưu tệp XML và hóa đơn tải về";
+                                fbd.SelectedPath = defaultDownloadsDir;
+
+                                if (fbd.ShowDialog() == DialogResult.OK)
+                                {
+                                    await PostWebMessageAsJson(new
+                                    {
+                                        action = "OUTPUT_DIR_SELECTED",
+                                        output_dir = fbd.SelectedPath,
+                                        requestId = packet.requestId
+                                    });
+                                }
+                                else
+                                {
+                                    // Người dùng bấm Hủy: báo về để giao diện tắt trạng thái đang tải
+                                    await PostWebMessageAsJson(new
+                                    {
+                                        action = "CRAWL_ERROR",
+                                        message = "Người dùng đã hủy chọn thư mục.",
+                                        requestId = packet.requestId
+                                    });
+                                }
+                            }
                         }));
                     }
                     catch (Exception ex)
@@ -650,6 +700,7 @@ namespace Frontend.Views
                     }
                     break;
                 case "START_CRAWL":
+                    if (!await EnsureAccountValidAsync()) break;
                     string outputDir = packet?.output_dir?.ToString();
                     string requestId = packet?.requestId != null ? packet.requestId.ToString() : null;
                     string crawlMst = packet?.mst != null ? packet.mst.ToString() : "";
@@ -939,7 +990,11 @@ namespace Frontend.Views
 
                 // Gửi trạng thái công tắc AI giải captcha lên trang Cài đặt
                 bool aiOn = await _taxService.GetCaptchaAiEnabledAsync();
-                await ExecuteScriptSerializedAsync($"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(aiOn ? "true" : "false")});");
+                bool allowAi = UserSession.AllowAI;
+                bool aiEnabled = allowAi && await _taxService.GetCaptchaAiEnabledAsync();
+                int maxQuota = UserSession.MaxTaxAccounts == int.MaxValue ? -1 : UserSession.MaxTaxAccounts;
+                string safeEndDate = JsonConvert.ToString(UserSession.EndDate ?? "");
+                await ExecuteScriptSerializedAsync($"window.accountQuota = {{ maxTaxAccounts: {maxQuota}, allowAI: {(allowAi ? "true" : "false")}, endDate: {safeEndDate} }}; if(window.updateQuotaBanner) window.updateQuotaBanner(); if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(aiEnabled ? "true" : "false")}, {(allowAi ? "true" : "false")});");
             }
             catch (Exception ex)
             {
@@ -993,6 +1048,7 @@ namespace Frontend.Views
 
         private async void UserForm_FormClosed(object sender, FormClosedEventArgs e)
         {
+            _sessionCheckTimer?.Stop();
             // Giải phóng bộ nhớ RAM hóa đơn
             InvoiceMemoryService.Instance.Clear("Đóng ứng dụng");
 
@@ -1151,6 +1207,7 @@ namespace Frontend.Views
         }
         private async Task RunStatusPolling()
         {
+            int lastTotal = 0;
             try
             {
                 while (_isCrawling)
@@ -1167,6 +1224,7 @@ namespace Frontend.Views
                             requestId = _currentCrawlRequestId
                         });
 
+                        lastTotal = statusInfo.total_invoices;
                         if (!statusInfo.is_running) _isCrawling = false;
                     }
                     if (_isCrawling) await Task.Delay(1000);
@@ -1188,7 +1246,7 @@ namespace Frontend.Views
                             action = "CRAWL_STATUS_UPDATE",
                             status = "Đang bóc tách chi tiết dữ liệu XML...",
                             is_running = true,
-                            total_invoices = 0,
+                            total_invoices = lastTotal,
                             requestId = _currentCrawlRequestId
                         });
 
@@ -1221,6 +1279,7 @@ namespace Frontend.Views
                     action = "CRAWL_FINISHED",
                     requestId = _currentCrawlRequestId,
                     output_dir = _currentCrawlOutputDir,
+                    total_invoices = lastTotal,
                     total_files_found = parseResult?.TotalFilesFound ?? 0,
                     parsed_xml_count = parseResult?.TotalFilesParsed ?? 0,
                     total_files_skipped = parseResult?.TotalFilesSkipped ?? 0,
@@ -1250,6 +1309,112 @@ namespace Frontend.Views
             }
             return Task.CompletedTask;
         }
+
+        private async Task<bool> EnsureAccountValidAsync()
+        {
+            if (UserSession.Role == "ADMINISTRATOR") return true;
+
+            // 1. Kiểm tra trạng thái trong bộ nhớ (0ms)
+            if (UserSession.Status == "LOCKED" || UserSession.Status == "EXPIRED")
+            {
+                await ExecuteScriptSerializedAsync(
+                    "if(window.showAlert) window.showAlert('Thông báo', 'Tài khoản của bạn đã bị tạm khóa hoặc hết hạn.', 'error');");
+                return false;
+            }
+
+            // 2. Kiểm tra hạn dùng EndDate (0ms)
+            if (!string.IsNullOrEmpty(UserSession.EndDate) && !MainForm.IsEndDateValid(UserSession.EndDate))
+            {
+                await ExecuteScriptSerializedAsync(
+                    $"if(window.showAlert) window.showAlert('Hết hạn', 'Tài khoản đã hết hạn sử dụng ({UserSession.EndDate}). Vui lòng liên hệ Admin.', 'error');");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Kiểm tra định kỳ với Google Sheet đúng 1 lần mỗi ngày (chạy hoàn toàn trong nền ngầm, không block UI).
+        /// </summary>
+        private async Task CheckDailyBackgroundAsync(bool force = false)
+        {
+            if (UserSession.Role == "ADMINISTRATOR") return;
+            if (Interlocked.Exchange(ref _checkingSession, 1) == 1) return;
+
+            try
+            {
+                string todayStr = DateTime.Now.ToString("yyyy-MM-dd");
+                var local = await _databaseService.GetLocalAccountAsync();
+
+                // Nếu hôm nay đã kiểm tra với Google Sheet rồi và không bắt buộc (force == false) -> Không gọi Google Sheet nữa!
+                if (!force && local != null && local.LastCheckedDate == todayStr && local.Status == "ACTIVE")
+                {
+                    return;
+                }
+
+                // Gọi Google Sheet ngầm (Background)
+                var check = await _authService.CheckAsync(force: true);
+
+                if (check.Success)
+                {
+                    // Cập nhật ngày kiểm tra hôm nay và các quyền mới vào SQLite
+                    await _databaseService.UpdateLocalAccountCheckAsync(
+                        todayStr,
+                        status: "ACTIVE",
+                        maxTax: check.MaxTaxAccounts,
+                        allowAI: check.AllowAI,
+                        endDate: check.EndDate,
+                        fullName: check.FullName
+                    );
+
+                    // Cập nhật RAM
+                    UserSession.Status = "ACTIVE";
+                    UserSession.MaxTaxAccounts = check.MaxTaxAccounts;
+                    UserSession.AllowAI = check.AllowAI;
+                    UserSession.EndDate = check.EndDate;
+                    if (!string.IsNullOrEmpty(check.FullName)) UserSession.FullName = check.FullName;
+
+                    // Gửi thông tin cập nhật nếu quota thay đổi
+                    _ = PostWebMessageAsJson(new { action = "ACCOUNT_UPDATED", maxQuota = check.MaxTaxAccounts, allowAI = check.AllowAI, endDate = check.EndDate });
+                }
+                else if (check.Result == "LOCKED" || check.Result == "EXPIRED" || check.Result == "WRONG_DEVICE")
+                {
+                    // Bị khóa từ xa trên Google Sheet!
+                    string reason = string.IsNullOrEmpty(check.Message)
+                        ? "Tài khoản của bạn đã bị khóa hoặc hết hạn bởi quản trị viên."
+                        : check.Message;
+
+                    await _databaseService.UpdateLocalAccountCheckAsync(todayStr, status: check.Result);
+                    UserSession.Status = check.Result;
+
+                    _sessionCheckTimer?.Stop();
+                    try { _searchCts?.Cancel(); } catch { }
+                    _isCrawling = false;
+                    try { await _taxService.StopTaxAsync(); } catch { }
+
+                    this.Invoke(new Action(() =>
+                    {
+                        MessageBox.Show(this, reason, "Thông báo tài khoản", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        _isForceClosing = true;
+                        this.Close();
+                    }));
+                }
+                else
+                {
+                    // Lỗi mạng hoặc server bận: do đang chạy ngầm nên KHÔNG làm phiền người dùng.
+                    System.Diagnostics.Debug.WriteLine("CheckDailyBackgroundAsync network warning: " + check.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("CheckDailyBackgroundAsync exception: " + ex.Message);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _checkingSession, 0);
+            }
+        }
+
 
 
 

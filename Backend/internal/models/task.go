@@ -31,6 +31,13 @@ type Invoice struct {
 	KetQuaKiemTra    string `json:"ket_qua_kiem_tra"`    // Cột 15
 	HoaDonLienQuan   string `json:"hoa_don_lien_quan"`   // Cột 16
 	ThongTinLienQuan string `json:"thong_tin_lien_quan"` // Cột 17
+
+	// Thông tin đối tác tách riêng (luồng gọi API điền; báo cáo Excel đọc trực tiếp, không phải parse từ ThongTinHoaDon)
+	TenNguoiBan    string `json:"ten_nguoi_ban,omitempty"`
+	DiaChiNguoiBan string `json:"dia_chi_nguoi_ban,omitempty"`
+	MSTNguoiMua    string `json:"mst_nguoi_mua,omitempty"`
+	TenNguoiMua    string `json:"ten_nguoi_mua,omitempty"`
+	DiaChiNguoiMua string `json:"dia_chi_nguoi_mua,omitempty"`
 }
 type CrawlResponse struct {
 	Status    string `json:"status"`

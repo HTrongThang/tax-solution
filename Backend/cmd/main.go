@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 
 	"TAXSOLUTION/internal/api"
 	"TAXSOLUTION/internal/captcha"
@@ -13,7 +15,18 @@ import (
 
 func main() {
 	// Nạp biến môi trường từ .env
-	captcha.LoadEnv(".env", "../.env")
+	envPaths := []string{".env", "../.env", "Backend/.env"}
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		envPaths = append(envPaths,
+			filepath.Join(exeDir, ".env"),
+			filepath.Join(exeDir, "..", ".env"),
+			filepath.Join(exeDir, "..", "..", ".env"),
+			filepath.Join(exeDir, "..", "..", "..", "..", "Backend", ".env"),
+		)
+	}
+	captcha.LoadEnv(envPaths...)
+	fmt.Printf("🤖 Giải captcha bằng AI: enabled=%v, có GEMINI_API_KEY=%v\n", captcha.Enabled(), captcha.HasKey())
 
 	// 0. Tự động kiểm tra dọn dẹp file log nếu đã sang tháng mới hoặc quá hạn
 	logger.CheckMonthlyCleanup()

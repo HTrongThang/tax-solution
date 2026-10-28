@@ -34,10 +34,25 @@ namespace Frontend.Services
                 using var conn = new SqliteConnection(_connectionString);
                 await conn.OpenAsync();
 
-                // 1. Tạo bảng TaxAccounts và Users
+                // 1. Tạo bảng TaxAccounts, Users và CurrentAccount (bản quyền tài khoản máy này)
                 using (var cmd = new SqliteCommand(SqlQueries.CreateTables, conn))
                 {
                     await cmd.ExecuteNonQueryAsync();
+                }
+                using (var cmd = new SqliteCommand(SqlQueries.CreateCurrentAccountTable, conn))
+                {
+                    await cmd.ExecuteNonQueryAsync();
+                }
+
+                // 1b. Thêm các cột thông tin doanh nghiệp cho DB cũ (bỏ qua lỗi nếu cột đã tồn tại)
+                foreach (var alter in SqlQueries.AddTaxAccountInfoColumns)
+                {
+                    try
+                    {
+                        using var alterCmd = new SqliteCommand(alter, conn);
+                        await alterCmd.ExecuteNonQueryAsync();
+                    }
+                    catch (SqliteException) { /* duplicate column name */ }
                 }
 
                 // 2. Tự động di chuyển dữ liệu cũ từ tax_accounts.json nếu có
@@ -78,6 +93,10 @@ namespace Frontend.Services
                         cmd.Parameters.AddWithValue("@CompanyName", item.CompanyName ?? string.Empty);
                         // Mã hóa mật khẩu bằng DPAPI trước khi lưu
                         cmd.Parameters.AddWithValue("@PasswordEncrypted", SecurityHelper.ProtectPassword(item.Password ?? string.Empty));
+                        cmd.Parameters.AddWithValue("@Address", DBNull.Value);
+                        cmd.Parameters.AddWithValue("@TaxDepartment", DBNull.Value);
+                        cmd.Parameters.AddWithValue("@Status", DBNull.Value);
+                        cmd.Parameters.AddWithValue("@OrgType", DBNull.Value);
                         await cmd.ExecuteNonQueryAsync();
                     }
 
@@ -170,11 +189,21 @@ namespace Frontend.Services
                     // Giải mã mật khẩu bằng DPAPI để C# và Go backend có thể sử dụng
                     string plainPass = SecurityHelper.UnprotectPassword(encPass);
 
+                    string GetStr(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
+                    string createdAt = GetStr(7);
+                    string dateText = null;
+                    if (DateTime.TryParse(createdAt, out var dt)) dateText = dt.ToString("dd/MM/yyyy");
+
                     result.Add(new CompanyModel
                     {
                         Mst = mst,
                         CompanyName = companyName,
-                        Password = plainPass
+                        Password = plainPass,
+                        Address = GetStr(3),
+                        TaxDepartment = GetStr(4),
+                        Status = GetStr(5),
+                        OrgType = GetStr(6),
+                        Date = dateText
                     });
                 }
             }
@@ -208,6 +237,10 @@ namespace Frontend.Services
                 cmd.Parameters.AddWithValue("@CompanyName", company.CompanyName ?? string.Empty);
                 // Mã hóa DPAPI
                 cmd.Parameters.AddWithValue("@PasswordEncrypted", SecurityHelper.ProtectPassword(company.Password ?? string.Empty));
+                cmd.Parameters.AddWithValue("@Address", (object)company.Address ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@TaxDepartment", (object)company.TaxDepartment ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Status", (object)company.Status ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@OrgType", (object)company.OrgType ?? DBNull.Value);
 
                 await cmd.ExecuteNonQueryAsync();
             }
@@ -336,6 +369,143 @@ namespace Frontend.Services
             {
                 System.Diagnostics.Debug.WriteLine("DatabaseService.AddUserAsync error: " + ex.Message);
                 throw;
+            }
+            finally
+            {
+                _dbLock.Release();
+            }
+        }
+
+        // =========================================================================
+        // 4. QUẢN LÝ BẢN QUYỀN VÀ PHIÊN TÀI KHOẢN CỤC BỘ (CurrentAccount)
+        // =========================================================================
+
+        /// <summary>
+        /// Lấy thông tin tài khoản bản quyền duy nhất được lưu trên máy này.
+        /// </summary>
+        public async Task<LocalAccountModel> GetLocalAccountAsync()
+        {
+            await _dbLock.WaitAsync();
+            try
+            {
+                using var conn = new SqliteConnection(_connectionString);
+                await conn.OpenAsync();
+
+                using var cmd = new SqliteCommand(SqlQueries.SelectCurrentAccount, conn);
+                using var reader = await cmd.ExecuteReaderAsync();
+
+                if (await reader.ReadAsync())
+                {
+                    return new LocalAccountModel
+                    {
+                        Username = reader.IsDBNull(0) ? "" : reader.GetString(0),
+                        FullName = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                        Role = reader.IsDBNull(2) ? "Staff" : reader.GetString(2),
+                        MaxTaxAccounts = reader.IsDBNull(3) ? 5 : reader.GetInt32(3),
+                        AllowAI = !reader.IsDBNull(4) && reader.GetInt32(4) == 1,
+                        EndDate = reader.IsDBNull(5) ? "" : reader.GetString(5),
+                        Status = reader.IsDBNull(6) ? "ACTIVE" : reader.GetString(6),
+                        PasswordHash = reader.IsDBNull(7) ? "" : reader.GetString(7),
+                        LastCheckedDate = reader.IsDBNull(8) ? "" : reader.GetString(8)
+                    };
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("GetLocalAccountAsync error: " + ex.Message);
+                return null;
+            }
+            finally
+            {
+                _dbLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Lưu hoặc cập nhật thông tin tài khoản bản quyền này xuống SQLite (Id = 1).
+        /// </summary>
+        public async Task SaveLocalAccountAsync(LocalAccountModel acc)
+        {
+            if (acc == null || string.IsNullOrWhiteSpace(acc.Username)) return;
+
+            await _dbLock.WaitAsync();
+            try
+            {
+                using var conn = new SqliteConnection(_connectionString);
+                await conn.OpenAsync();
+
+                using var cmd = new SqliteCommand(SqlQueries.UpsertCurrentAccount, conn);
+                cmd.Parameters.AddWithValue("@Username", acc.Username.Trim());
+                cmd.Parameters.AddWithValue("@FullName", acc.FullName ?? string.Empty);
+                cmd.Parameters.AddWithValue("@Role", string.IsNullOrEmpty(acc.Role) ? "Staff" : acc.Role);
+                cmd.Parameters.AddWithValue("@MaxTaxAccounts", acc.MaxTaxAccounts);
+                cmd.Parameters.AddWithValue("@AllowAI", acc.AllowAI ? 1 : 0);
+                cmd.Parameters.AddWithValue("@EndDate", acc.EndDate ?? string.Empty);
+                cmd.Parameters.AddWithValue("@Status", string.IsNullOrEmpty(acc.Status) ? "ACTIVE" : acc.Status);
+                cmd.Parameters.AddWithValue("@PasswordHash", acc.PasswordHash ?? string.Empty);
+                cmd.Parameters.AddWithValue("@LastCheckedDate", acc.LastCheckedDate ?? string.Empty);
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("SaveLocalAccountAsync error: " + ex.Message);
+            }
+            finally
+            {
+                _dbLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Cập nhật kết quả kiểm tra định kỳ (chỉ cập nhật ngày check và các quyền nếu có thay đổi từ Google Sheet).
+        /// </summary>
+        public async Task UpdateLocalAccountCheckAsync(string lastCheckedDate, string status = null, int? maxTax = null, bool? allowAI = null, string endDate = null, string fullName = null)
+        {
+            await _dbLock.WaitAsync();
+            try
+            {
+                using var conn = new SqliteConnection(_connectionString);
+                await conn.OpenAsync();
+
+                using var cmd = new SqliteCommand(SqlQueries.UpdateCurrentAccountCheck, conn);
+                cmd.Parameters.AddWithValue("@LastCheckedDate", lastCheckedDate ?? string.Empty);
+                cmd.Parameters.AddWithValue("@Status", (object)status ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@MaxTaxAccounts", maxTax.HasValue ? (object)maxTax.Value : DBNull.Value);
+                cmd.Parameters.AddWithValue("@AllowAI", allowAI.HasValue ? (object)(allowAI.Value ? 1 : 0) : DBNull.Value);
+                cmd.Parameters.AddWithValue("@EndDate", (object)endDate ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@FullName", (object)fullName ?? DBNull.Value);
+
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("UpdateLocalAccountCheckAsync error: " + ex.Message);
+            }
+            finally
+            {
+                _dbLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Xóa thông tin bản quyền tài khoản này khỏi SQLite (khi Logout hoặc khi bị khóa vĩnh viễn).
+        /// </summary>
+        public async Task ClearLocalAccountAsync()
+        {
+            await _dbLock.WaitAsync();
+            try
+            {
+                using var conn = new SqliteConnection(_connectionString);
+                await conn.OpenAsync();
+
+                using var cmd = new SqliteCommand(SqlQueries.ClearCurrentAccount, conn);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("ClearLocalAccountAsync error: " + ex.Message);
             }
             finally
             {

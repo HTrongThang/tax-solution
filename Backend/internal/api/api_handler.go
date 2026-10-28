@@ -4,6 +4,7 @@ import (
 	"TAXSOLUTION/internal/captcha"
 	"TAXSOLUTION/internal/crawler"
 	"TAXSOLUTION/internal/models"
+	"TAXSOLUTION/internal/taxapi"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 
 type Handler struct {
 	Crawler *crawler.CrawlerService
+	api     apiState // trạng thái chế độ gọi thẳng API (xem api_mode.go)
 }
 
 func NewHandler(c *crawler.CrawlerService) *Handler {
@@ -28,6 +30,18 @@ func NewHandler(c *crawler.CrawlerService) *Handler {
 
 // --- ĐẶT HÀM SETUPROUTER Ở ĐÂY ---
 func SetupRouter(r *gin.Engine, h *Handler) {
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
+	registerAuthRoutes(r) // API xác thực tài khoản phần mềm (/api/auth/...)
+
 	taxRoutes := r.Group("/api/tax")
 	{
 		taxRoutes.GET("/init", h.InitTaxPage)
@@ -49,11 +63,25 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 
 // GetCaptchaAI: trả về trạng thái công tắc giải captcha bằng AI.
 func (h *Handler) GetCaptchaAI(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"enabled": captcha.Enabled()})
+	sess := authService().Current()
+	allowed := sess == nil || sess.AllowAI
+	c.JSON(http.StatusOK, gin.H{"enabled": canUseAI(), "allowed": allowed})
+}
+
+func canUseAI() bool {
+	sess := authService().Current()
+	if sess != nil && !sess.AllowAI {
+		return false
+	}
+	return captcha.Enabled()
 }
 
 // SetCaptchaAI: bật/tắt giải captcha bằng AI (lưu vào .env).
 func (h *Handler) SetCaptchaAI(c *gin.Context) {
+	if sess := authService().Current(); sess != nil && !sess.AllowAI {
+		c.JSON(http.StatusForbidden, gin.H{"status": "error", "enabled": false, "allowed": false, "message": "Tài khoản chưa được cấp quyền AI giải Captcha."})
+		return
+	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -107,7 +135,7 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 		return
 	}
 
-	if !captcha.Enabled() {
+	if !canUseAI() {
 		c.JSON(http.StatusOK, models.Response{
 			Status:  "success",
 			Message: "Đã lấy mã captcha thành công!",
@@ -159,6 +187,14 @@ func (h *Handler) LoginTax(c *gin.Context) {
 	fmt.Printf("---> [GO] Bắt đầu quá trình Login cho MST: %s\n", req.TaxCode)
 
 	// 2. Gọi hàm Login (Bước giả lập tốn thời gian nhất)
+	// Nếu tài khoản không được cấp quyền AI nhưng gọi LoginTax với Captcha rỗng -> từ chối
+	if strings.TrimSpace(req.Captcha) == "" && !canUseAI() {
+		c.JSON(http.StatusForbidden, models.Response{
+			Status:  "error_captcha",
+			Message: "SAI_CAPTCHA: Tài khoản chưa được cấp quyền AI giải Captcha, vui lòng nhập mã Captcha thủ công.",
+		})
+		return
+	}
 	err := h.Crawler.Login(req.TaxCode, req.Password, req.Captcha)
 
 	// --- KẾT THÚC ĐO ---
@@ -209,6 +245,14 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 		})
 		return
 	}
+
+	// Chế độ gọi thẳng API (TAX_MODE=api): không điều khiển giao diện Chrome
+	if apiSearchSupported(invoiceType, category, checkResult) {
+		h.apiSearch(c, fromDate, toDate, invoiceType)
+		return
+	}
+	// Luồng Chrome: xóa danh sách API cũ để nút tải không dùng nhầm dữ liệu của lần tìm trước
+	h.api.setItems(nil, "")
 
 	// Headers SSE
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -300,6 +344,38 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 	// 4. Gán đường dẫn vào Crawler để các hàm con (ExtractAndMove) sử dụng
 	h.Crawler.OutputDir = finalDir
 
+	// Chế độ gọi thẳng API: nếu lần tìm gần nhất đã chạy bằng API thì tải XML trực tiếp
+	if apiItems := h.apiDownloadReady(req.InvoiceType); len(apiItems) > 0 {
+		// Đang có tiến trình tải chạy → không mở thêm luồng thứ hai (lẫn số đếm, dễ bị cổng chặn 429)
+		if h.Crawler.IsRunning {
+			_ = os.Remove(finalDir)
+			c.JSON(http.StatusConflict, models.CrawlResponse{
+				Status:  "error",
+				Message: "Đang có tiến trình tải chạy, vui lòng đợi hoàn tất hoặc hủy trước.",
+			})
+			return
+		}
+		// Lần trước tải chưa đủ cùng danh sách này → dùng lại thư mục đó, chỉ tải bù phần còn thiếu
+		prefix := fmt.Sprintf("%s_%s_", mst, invoiceType)
+		if mst == "" {
+			prefix = invoiceType + "_"
+		}
+		if resume := taxapi.FindResumeDir(outputDir, prefix, apiItems); resume != "" {
+			_ = os.Remove(finalDir) // thư mục mới vừa tạo còn rỗng
+			finalDir = resume
+			h.Crawler.OutputDir = finalDir
+			fmt.Printf("♻️ Tải bù vào thư mục đang dở: %s\n", finalDir)
+		}
+		h.apiDownload(apiItems, finalDir)
+		c.JSON(http.StatusOK, models.CrawlResponse{
+			Status:    "success",
+			Message:   "Tiến trình tải dữ liệu (API) đã bắt đầu chạy ngầm.",
+			TaskID:    fmt.Sprintf("TASK_%d", time.Now().Unix()),
+			OutputDir: finalDir,
+		})
+		return
+	}
+
 	// 5. KÍCH HOẠT CHẠY NGẦM (GOROUTINE)
 	// Giải phóng cho Postman/ .NET ngay lập tức
 	go func() {
@@ -335,6 +411,7 @@ func (h *Handler) CheckCrawlStatus(c *gin.Context) {
 // StopTax: Dừng tiến trình cào hoặc tìm kiếm
 func (h *Handler) StopTax(c *gin.Context) {
 	h.Crawler.Stop()
+	h.api.stop()
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "success",
 		"message": "Đã gửi lệnh dừng tiến trình.",

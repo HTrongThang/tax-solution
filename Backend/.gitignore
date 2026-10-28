@@ -1,0 +1,7 @@
+
+apitest_output.json
+apitest_xml/
+log.txt
+tmp/
+*.png
+__debug_bin*
