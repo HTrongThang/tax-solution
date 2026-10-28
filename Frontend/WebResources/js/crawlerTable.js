@@ -250,6 +250,12 @@ if (window.chrome?.webview) {
 window.handleSseProgress = function (data) {
     if (!data) return;
 
+    // Cổng thuế yêu cầu nhập captcha khi tìm kiếm hóa đơn MTT → mở popup nhập mã
+    const captchaImg = data.captcha || data.Captcha;
+    if (captchaImg && typeof window.openSearchCaptcha === 'function') {
+        window.openSearchCaptcha(captchaImg, data.status || data.Status || '');
+    }
+
     // Update status box
     if (window.updateCrawlerStatus) window.updateCrawlerStatus(data);
 
@@ -261,6 +267,10 @@ window.handleSseProgress = function (data) {
 
     // Normalize fields
     const isDone = data && (data.is_done !== undefined ? data.is_done : (data.IsDone !== undefined ? data.IsDone : false));
+    // Tìm kiếm kết thúc (hủy / hết giờ / lỗi) trong khi popup captcha tìm kiếm còn mở → đóng popup
+    if (isDone && window._captchaMode === 'search' && typeof window.closeCaptcha === 'function') {
+        window.closeCaptcha();
+    }
     if (!isDone) {
         window._searchWatchdogId = setTimeout(() => {
             console.warn('Search watchdog triggered (no progress for 90s) — finalizing UI');
@@ -372,23 +382,36 @@ window.handlePagination = function ({ invoices = null, totalItems = 0, currentPa
 };
 // Hàm 1: Trung gian - Gọi khi bấm nút
 window.handleLoginClick = function (btn) {
+    const selectCompany = document.getElementById('select-company');
+    const mst = selectCompany ? selectCompany.value : '';
+    if (!mst) {
+        btn.disabled = false;
+        btn.innerText = "Đăng nhập";
+        btn.classList.remove('opacity-50', 'pointer-events-none');
+        return window.showAlert('Thông báo', 'Vui lòng chọn một công ty từ danh sách trước khi đăng nhập!', 'error');
+    }
+
     // Hiệu ứng loading để người dùng không bấm lung tung
     const originalText = btn.innerText;
     btn.innerText = "Đang kết nối...";
     btn.classList.add('opacity-50', 'pointer-events-none');
 
     if (window.chrome && window.chrome.webview) {
-        // Gửi lệnh yêu cầu C# đi lấy ảnh
+        window._selectedCompanyMst = mst;
+        // Gửi lệnh yêu cầu C# kèm MST đã chọn để C# có thể tự động giải AI
         window.chrome.webview.postMessage({
-            action: "REQUEST_OPEN_CAPTCHA"
+            action: "REQUEST_OPEN_CAPTCHA",
+            data: {
+                taxCode: mst
+            }
         });
     }
 
-    // Tự phục hồi nút sau 2.5s nếu Backend Go gặp sự cố
+    // Tự phục hồi nút sau 10s nếu Backend Go gặp sự cố
     setTimeout(() => {
         btn.innerText = originalText;
         btn.classList.remove('opacity-50', 'pointer-events-none');
-    }, 2500);
+    }, 10000);
 };
 
 // Hủy tìm kiếm - gửi lệnh tới C#
@@ -478,32 +501,90 @@ window.handleCancelCrawlModal = function (btn) {
     }, 400);
 };
 // Hàm 2: Chỉ làm nhiệm vụ hiển thị (C# sẽ gọi hàm này)
-window.openCaptcha = function (captchaBase64) {
+// Popup captcha dùng chung cho 2 mục đích: 'login' (đăng nhập) và 'search' (tìm kiếm hóa đơn MTT)
+window._captchaMode = 'login';
+window.openCaptcha = function (captchaBase64, prefilledCode = '') {
     const modal = document.getElementById('captcha-modal');
     const img = document.getElementById('img-captcha');
     const input = document.getElementById('input-captcha');
     if (captchaBase64) {
         img.src = captchaBase64;
+        img.style.opacity = '1';
         modal.classList.remove('hidden');
 
         if (input) {
             input.disabled = false;
-            input.value = '';
-            setTimeout(() => input.focus(), 200);
+            input.value = prefilledCode || '';
+            setTimeout(() => {
+                input.focus();
+                if (prefilledCode) {
+                    input.select();
+                }
+            }, 200);
+
+            // AI đã điền sẵn mã (chỉ đăng nhập) → tự bấm Xác nhận, tối đa 3 lần liên tiếp để không lặp vô hạn nếu AI đọc sai
+            if (prefilledCode && window._captchaMode !== 'search') {
+                window._aiAutoSubmitCount = (window._aiAutoSubmitCount || 0) + 1;
+                if (window._aiAutoSubmitCount <= 3) {
+                    setTimeout(() => {
+                        const modalEl = document.getElementById('captcha-modal');
+                        const inp = document.getElementById('input-captcha');
+                        if (modalEl && !modalEl.classList.contains('hidden') && inp && inp.value === prefilledCode && !inp.disabled) {
+                            window.submitCaptcha();
+                        }
+                    }, 700);
+                } else {
+                    window.showAlert?.('Captcha', 'AI đọc chưa đúng nhiều lần, vui lòng kiểm tra và nhập tay.', 'warning');
+                }
+            }
         }
     } else {
         window.showAlert('Lỗi', 'Không thể lấy mã Captcha từ hệ thống Thuế!', 'error');
     }
 };
 
+// Mở popup captcha cho lần tìm kiếm hóa đơn MTT (ảnh do Go gửi qua SSE)
+window.openSearchCaptcha = function (captchaSrc, statusText) {
+    if (typeof captchaSrc !== 'string' || !captchaSrc.startsWith('data:image/')) return;
+    const modal = document.getElementById('captcha-modal');
+    if (!modal) return;
+
+    window._captchaMode = 'search';
+    modal.style.zIndex = '100000'; // nổi trên modal tiến độ tìm kiếm
+    const title = document.getElementById('captcha-modal-title');
+    if (title) title.innerText = 'Captcha tra cứu hóa đơn máy tính tiền';
+
+    window.openCaptcha(captchaSrc);
+
+    if (statusText && statusText.indexOf('⚠️') === 0) {
+        window.showAlert?.('Sai captcha', statusText.replace('⚠️', '').trim(), 'warning');
+    }
+};
+
 // Hàm đóng Popup
 window.closeCaptcha = function () {
+    window._aiAutoSubmitCount = 0;
     const modal = document.getElementById('captcha-modal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+        modal.classList.add('hidden');
+        modal.style.zIndex = '';
+    }
     const input = document.getElementById('input-captcha');
     if (input) {
         input.value = '';
         input.disabled = false;
+    }
+    const title = document.getElementById('captcha-modal-title');
+    if (title) title.innerText = 'Xác thực Captcha';
+    window._captchaMode = 'login';
+};
+
+// Bấm Hủy trên popup: với captcha tìm kiếm thì hủy luôn lần tìm kiếm đang chờ
+window.cancelCaptcha = function () {
+    const isSearch = window._captchaMode === 'search';
+    window.closeCaptcha();
+    if (isSearch && typeof window.handleCancelCrawlModal === 'function') {
+        window.handleCancelCrawlModal();
     }
 };
 
@@ -512,7 +593,8 @@ window.refreshCaptcha = function () {
     const img = document.getElementById('img-captcha');
     if (img) img.style.opacity = '0.5';
     if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage({ action: 'REFRESH_CAPTCHA' });
+        const action = window._captchaMode === 'search' ? 'REFRESH_SEARCH_CAPTCHA' : 'REFRESH_CAPTCHA';
+        window.chrome.webview.postMessage({ action });
     }
 };
 
@@ -527,6 +609,20 @@ window.handleLogout = function () {
 
 window.submitCaptcha = function () {
     const inputCaptcha = document.getElementById('input-captcha');
+
+    // Captcha tìm kiếm hóa đơn MTT: chỉ cần mã, không liên quan đăng nhập
+    if (window._captchaMode === 'search') {
+        const searchCode = inputCaptcha ? inputCaptcha.value.trim() : '';
+        if (!searchCode) {
+            return window.showAlert('Thông báo', 'Vui lòng nhập mã Captcha!', 'error');
+        }
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.postMessage({ action: 'SUBMIT_SEARCH_CAPTCHA', data: { captcha: searchCode } });
+        }
+        if (inputCaptcha) inputCaptcha.disabled = true;
+        return;
+    }
+
     const selectCompany = document.getElementById('select-company');
 
     const code = inputCaptcha ? inputCaptcha.value : '';

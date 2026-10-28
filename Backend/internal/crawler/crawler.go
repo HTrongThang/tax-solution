@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"TAXSOLUTION/internal/captcha"
 	"TAXSOLUTION/internal/logger"
 	"TAXSOLUTION/internal/models"
 	"archive/zip"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -32,6 +34,23 @@ type CrawlerService struct {
 	CurrentTaxCode     string // Mã số thuế hiện tại
 	CurrentInvoiceType string // Chiều hóa đơn: ban_ra hoặc mua_vao
 	CurrentDateRange   string // Khoảng ngày: vd 01/10/2026-31/10/2026
+
+	// Captcha khi tìm kiếm hóa đơn MTT: kênh nhận mã người dùng nhập (nil = không có captcha đang chờ)
+	searchCaptchaMu sync.Mutex
+	searchCaptchaCh chan string
+
+	// Captcha khi chuyển trang (MTT)
+	pagerCaptchaOn     bool
+	pagerCaptchaCtx    context.Context
+	pagerCaptchaStream chan models.StreamData
+	pagerCaptchaErr    error
+
+	// Hình thức tra cứu gần nhất (để luồng tải chi tiết biết có cần xử lý captcha MTT) và chế độ chỉ-AI (không có popup nhập tay)
+	searchCategory  string
+	captchaNoManual bool
+
+	// Thời điểm lần tìm kiếm gần nhất có dữ liệu (để nghỉ 5s trước khi chuyển tab)
+	lastDataAt time.Time
 }
 
 // logError: Ghi lỗi 1 dòng vào %AppData%\TaxSolution\logs\error.log
@@ -92,6 +111,10 @@ func (s *CrawlerService) EnsureBrowser() error {
 		l = l.Bin("C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe")
 	}
 	l.Append("--start-maximized")
+
+	// Chrome chặn trang tải nhiều file liên tiếp ("Needs permission to download") → bật sẵn quyền "Tự động tải nhiều file"
+	// cho hồ sơ Chrome của bot để việc tải hàng loạt hóa đơn không bị chặn giữa chừng.
+	l = l.Preferences(`{"profile":{"default_content_setting_values":{"automatic_downloads":1}},"download":{"prompt_for_download":false}}`)
 
 	url, err := l.Launch()
 	if err != nil {
@@ -320,7 +343,7 @@ func (s *CrawlerService) GetCaptcha() (string, error) {
 
 	return "", fmt.Errorf("không thể lấy captcha: %v", lastErr)
 }
-func (c *CrawlerService) Login(user, pass, captcha string) error {
+func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 	fmt.Println("🚀 Đang thực hiện đăng nhập (Chế độ kiểm soát nghiêm ngặt)...")
 	c.CurrentTaxCode = strings.TrimSpace(user)
 
@@ -330,83 +353,156 @@ func (c *CrawlerService) Login(user, pass, captcha string) error {
 		return err
 	}
 
-	// --- 1. ĐIỀN THÔNG TIN ---
-	// Sử dụng MustClick trước khi Input để React nhận diện Focus State
-	c.Page.MustElement(".ant-modal-content #username").MustClick().MustSelectText(".*").MustInput(user)
-	c.Page.MustElement(".ant-modal-content #password").MustClick().MustSelectText(".*").MustInput(pass)
+	isAutoSolve := strings.TrimSpace(manualCaptcha) == "" && captcha.Enabled()
+	maxAttempts := 1
+	if isAutoSolve {
+		maxAttempts = 3 // Thử tự động tối đa 3 lần với AI nếu portal báo sai captcha
+	}
 
-	elCap := c.Page.MustElement(".ant-modal-content #cvalue")
-	elCap.MustClick().MustSelectText(".*").MustInput(captcha)
-
-	// Ép React/Ant Design nhận diện sự thay đổi dữ liệu (Trigger Events)
-	c.Page.MustEval(`() => {
-        const ev = { bubbles: true };
-        document.querySelectorAll('.ant-modal-content input').forEach(i => {
-            i.dispatchEvent(new Event('input', ev));
-            i.dispatchEvent(new Event('change', ev));
-        });
-    }`)
-
-	// --- 2. CLICK ĐĂNG NHẬP ---
-	c.Page.MustElement(".ant-modal-content button.ant-btn-primary").MustClick()
-
-	// --- 3. VÒNG LẶP KIỂM TRA (CHỐT KẾT QUẢ) ---
-	fmt.Println("⏳ Đang quét lỗi và trạng thái hệ thống...")
-
-	for i := 0; i < 25; i++ {
-		// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế Thắng gửi)
-		// Check nút Logout (mũi tên phải), icon User, icon Bell
-		hasSuccess, _, _ := c.Page.Has(".anticon-arrow-right, .anticon-user, .anticon-bell")
-
-		// Check URL (Chỉ tin thành công nếu URL chứa domain thuế và KHÔNG chứa chữ login/auth)
-		currURL := c.Page.MustInfo().URL
-		isAuthPage := strings.Contains(strings.ToLower(currURL), "login") || strings.Contains(strings.ToLower(currURL), "auth")
-
-		if hasSuccess && !isAuthPage {
-			fmt.Println("✅ Đăng nhập thành công thực tế!")
-			return nil
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if isAutoSolve && attempt > 1 {
+			fmt.Printf("🔄 [Hệ thống Login] Thử lại lần %d/%d (lấy mã captcha mới và giải lại)...\n", attempt, maxAttempts)
+			time.Sleep(1 * time.Second)
 		}
 
-		// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 3 ~ 1 giây để tránh lỗi cũ)
-		if i > 2 {
-			errText, _ := c.Page.Eval(`() => {
-				const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
-				for (const n of notis) {
-					const t = (n.innerText || n.textContent || '').trim();
-					if (t) return t;
-				}
-				return '';
-			}`)
+		// --- 1. ĐIỀN THÔNG TIN ---
+		// Sử dụng MustClick trước khi Input để React nhận diện Focus State
+		c.Page.MustElement(".ant-modal-content #username").MustClick().MustSelectText(".*").MustInput(user)
+		c.Page.MustElement(".ant-modal-content #password").MustClick().MustSelectText(".*").MustInput(pass)
 
-			if errText != nil && errText.Value.String() != "" {
-				msg := errText.Value.String()
-				fmt.Printf("❌ Thất bại xác thực: %s\n", msg)
-				loginErr := parseLoginError(msg)
-				c.logError("loginTax", loginErr, msg)
-				return loginErr
+		// Tự động giải captcha bằng AI nếu chưa có mã hoặc mã rỗng
+		finalCaptcha := strings.TrimSpace(manualCaptcha)
+		if isAutoSolve {
+			fmt.Printf("🤖 [Lần %d] Chưa có mã Captcha, tự động giải bằng Gemini AI...\n", attempt)
+			capBase64, errCap := c.GetCaptcha()
+			if errCap != nil || capBase64 == "" {
+				lastErr = fmt.Errorf("không thể lấy ảnh captcha: %v", errCap)
+				continue
+			}
+
+			cleanCap := capBase64
+			if idx := strings.Index(cleanCap, ","); idx != -1 {
+				cleanCap = cleanCap[idx+1:]
+			}
+
+			imgBytes, errDec := base64.StdEncoding.DecodeString(cleanCap)
+			if errDec != nil {
+				lastErr = fmt.Errorf("không thể decode ảnh captcha: %v", errDec)
+				continue
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			aiCode, aiErr := captcha.SolveCaptchaImage(ctx, imgBytes)
+			cancel()
+
+			if aiErr == nil && len(aiCode) == 6 {
+				fmt.Printf("🤖 Gemini giải captcha đăng nhập thành công: %s\n", aiCode)
+				finalCaptcha = aiCode
+			} else {
+				fmt.Printf("⚠️ Gemini không giải được captcha đăng nhập (lỗi: %v, code: '%s')\n", aiErr, aiCode)
+				lastErr = fmt.Errorf("SAI_CAPTCHA: AI không nhận diện được mã")
+				continue
 			}
 		}
 
-		time.Sleep(300 * time.Millisecond)
-	}
+		elCap := c.Page.MustElement(".ant-modal-content #cvalue")
+		elCap.MustClick().MustSelectText(".*").MustInput(finalCaptcha)
 
-	// --- 4. CHỐT CHẶN CUỐI CÙNG ---
-	// Kiểm tra xem trang có báo lỗi gì còn sót lại không
-	finalErr, _ := c.Page.Eval(`() => {
-		const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
-		for (const n of notis) {
-			const t = (n.innerText || n.textContent || '').trim();
-			if (t) return t;
+		// Ép React/Ant Design nhận diện sự thay đổi dữ liệu (Trigger Events)
+		c.Page.MustEval(`() => {
+			const ev = { bubbles: true };
+			document.querySelectorAll('.ant-modal-content input').forEach(i => {
+				i.dispatchEvent(new Event('input', ev));
+				i.dispatchEvent(new Event('change', ev));
+			});
+		}`)
+
+		// --- 2. CLICK ĐĂNG NHẬP ---
+		c.Page.MustElement(".ant-modal-content button.ant-btn-primary").MustClick()
+
+		// --- 3. VÒNG LẶP KIỂM TRA (CHỐT KẾT QUẢ) ---
+		fmt.Println("⏳ Đang quét lỗi và trạng thái hệ thống...")
+		var iterErr error
+
+		for i := 0; i < 25; i++ {
+			// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế Thắng gửi)
+			// Check nút Logout (mũi tên phải), icon User, icon Bell
+			hasSuccess, _, _ := c.Page.Has(".anticon-arrow-right, .anticon-user, .anticon-bell")
+
+			// Check URL (Chỉ tin thành công nếu URL chứa domain thuế và KHÔNG chứa chữ login/auth)
+			currURL := c.Page.MustInfo().URL
+			isAuthPage := strings.Contains(strings.ToLower(currURL), "login") || strings.Contains(strings.ToLower(currURL), "auth")
+
+			if hasSuccess && !isAuthPage {
+				fmt.Println("✅ Đăng nhập thành công thực tế!")
+				return nil
+			}
+
+			// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 3 ~ 1 giây để tránh lỗi cũ)
+			if i > 2 {
+				errText, _ := c.Page.Eval(`() => {
+					const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
+					for (const n of notis) {
+						const t = (n.innerText || n.textContent || '').trim();
+						if (t) return t;
+					}
+					return '';
+				}`)
+
+				if errText != nil && errText.Value.String() != "" {
+					msg := errText.Value.String()
+					fmt.Printf("❌ Thất bại xác thực: %s\n", msg)
+					iterErr = parseLoginError(msg)
+					break
+				}
+			}
+
+			time.Sleep(300 * time.Millisecond)
 		}
-		return '';
-	}`)
-	if finalErr != nil && finalErr.Value.String() != "" {
-		msg := finalErr.Value.String()
-		loginErr := parseLoginError(msg)
-		c.logError("loginTax", loginErr, msg)
-		return loginErr
+
+		if iterErr != nil {
+			c.logError("loginTax", iterErr, iterErr.Error())
+			if strings.Contains(iterErr.Error(), "SAI_THONG_TIN") {
+				return iterErr
+			}
+			if isAutoSolve && strings.Contains(iterErr.Error(), "SAI_CAPTCHA") {
+				lastErr = iterErr
+				continue
+			}
+			return iterErr
+		}
+
+		// --- 4. CHỐT CHẶN CUỐI CÙNG ---
+		// Kiểm tra xem trang có báo lỗi gì còn sót lại không
+		finalErr, _ := c.Page.Eval(`() => {
+			const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
+			for (const n of notis) {
+				const t = (n.innerText || n.textContent || '').trim();
+				if (t) return t;
+			}
+			return '';
+		}`)
+		if finalErr != nil && finalErr.Value.String() != "" {
+			msg := finalErr.Value.String()
+			loginErr := parseLoginError(msg)
+			c.logError("loginTax", loginErr, msg)
+			if strings.Contains(loginErr.Error(), "SAI_THONG_TIN") {
+				return loginErr
+			}
+			if isAutoSolve && strings.Contains(loginErr.Error(), "SAI_CAPTCHA") {
+				lastErr = loginErr
+				continue
+			}
+			return loginErr
+		}
+
+		lastErr = fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc trang thuế chưa phản hồi")
 	}
 
+	if lastErr != nil {
+		return lastErr
+	}
 	timeoutErr := fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc thông tin đăng nhập không hợp lệ")
 	c.logError("loginTax", timeoutErr, "Quá thời gian chờ đăng nhập")
 	return timeoutErr
@@ -549,6 +645,14 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		c.Page = c.Browser.MustPage()
 	}
 
+	// MTT: bật xử lý captcha mỗi lần chuyển trang trong suốt lượt tra cứu này
+	c.pagerCaptchaOn = category == "may_tinh_tien"
+	c.pagerCaptchaCtx = ctx
+	c.pagerCaptchaStream = stream
+	c.pagerCaptchaErr = nil
+	c.searchCategory = category
+	defer func() { c.pagerCaptchaOn = false; c.pagerCaptchaStream = nil }()
+
 	var allInvoices []models.Invoice
 	seen := make(map[string]bool)
 	c.IsRunning = true
@@ -604,6 +708,18 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		}
 	} else {
 		fmt.Println("📄 Đã ở trang Tra cứu, bỏ qua điều hướng.")
+	}
+
+	// Lần tìm kiếm trước có dữ liệu → nghỉ đủ 5s (tính từ lúc có dữ liệu) rồi mới click chuyển tab
+	if !c.lastDataAt.IsZero() {
+		if remain := 5*time.Second - time.Since(c.lastDataAt); remain > 0 {
+			if stream != nil {
+				stream <- models.StreamData{Status: "⏳ Nghỉ vài giây trước khi chuyển tab...", IsDone: false}
+			}
+			fmt.Printf("⏳ Nghỉ %.1fs trước khi chuyển tab...\n", remain.Seconds())
+			time.Sleep(remain)
+		}
+		c.lastDataAt = time.Time{}
 	}
 
 	// --- 1.1. CHỌN TAB CHIỀU HÓA ĐƠN (BÁN RA / MUA VÀO) ---
@@ -791,6 +907,21 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 			stream <- models.StreamData{Status: "❌ Không thể click nút tìm kiếm", IsDone: true}
 		}
 		return nil, fmt.Errorf("không thể click nút tìm kiếm: %v", err)
+	}
+
+	// Hóa đơn MTT: cổng thuế bắt nhập captcha mỗi lần bấm Tìm kiếm → chờ người dùng nhập trên app
+	if category == "may_tinh_tien" {
+		if errCap := c.handleSearchCaptcha(ctx, stream); errCap != nil {
+			if ctx.Err() != nil || c.StopRequested {
+				c.CurrentStatus = "Đã hủy"
+			} else {
+				c.CurrentStatus = "Lỗi"
+			}
+			if stream != nil {
+				stream <- models.StreamData{Status: "❌ " + errCap.Error(), IsDone: true}
+			}
+			return allInvoices, errCap
+		}
 	}
 
 	// Đợi website thuế xử lý request: chờ spinner xuất hiện rồi biến mất (tối đa 3 phút)
@@ -1305,13 +1436,25 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 
 		// --- 4. CHUYỂN TRANG ---
 		// Nếu đã thu thập đủ tổng số hóa đơn báo trên trang thuế -> Dừng
+		// Đã đủ số hóa đơn thuế báo → chỉ dừng khi ô "N / M" khớp (đã ở trang cuối) hoặc không đọc được ô này
 		if totalOnTax > 0 && len(allInvoices) >= totalOnTax {
-			fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn. Dừng chuyển trang!\n", len(allInvoices), totalOnTax)
-			break
+			cp, tp := c.pagerPos()
+			if tp == 0 || cp >= tp {
+				fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn (trang %d/%d). Dừng chuyển trang!\n", len(allInvoices), totalOnTax, cp, tp)
+				break
+			}
+			fmt.Printf("ℹ️ Đã đủ %d/%d hóa đơn nhưng ô trang mới %d/%d, tiếp tục sang trang kế để đến trang cuối.\n", len(allInvoices), totalOnTax, cp, tp)
 		}
 
 		// Dừng theo vị trí thật "N / M" trên trang thuế (không dùng biến đếm pageIdx vì có thể lệch khi thuế chậm)
-		if curPos, totPos := c.pagerPos(); totPos > 0 {
+		curPos, totPos := c.pagerPos()
+		// Chưa lấy đủ số hóa đơn mà thấy "trang cuối" → đọc lại vị trí (thuế đang loading có thể hiển thị sai) trước khi kết luận
+		for v := 0; v < 3 && totalOnTax > 0 && len(allInvoices) < totalOnTax && (totPos == 0 || curPos >= totPos) && ctx.Err() == nil && !c.StopRequested; v++ {
+			c.waitTaxIdle(ctx, stream, 30*time.Second)
+			time.Sleep(3 * time.Second)
+			curPos, totPos = c.pagerPos()
+		}
+		if totPos > 0 {
 			if curPos >= totPos {
 				fmt.Printf("🏁 Đã đến trang cuối %d/%d.\n", curPos, totPos)
 				break
@@ -1324,10 +1467,31 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 		// Ưu tiên: bấm nút > bằng CLICK CHUỘT THẬT và xác nhận ô "N / M" đã đổi trang thật.
 		// Nếu thuế không chuyển trang -> dừng an toàn, không đếm trang ảo.
 		if curPos, totPos := c.pagerPos(); totPos > 0 {
-			if !c.goNextPage(curPos, totPos) {
+			nextOK := c.goNextPage(curPos, totPos)
+			// Chưa lấy đủ mà không sang được trang: chờ thuế rảnh rồi thử lại (tối đa 3 vòng) trước khi bỏ cuộc
+			for retry := 1; !nextOK && retry <= 10 && ctx.Err() == nil && !c.StopRequested && c.pagerCaptchaErr == nil; retry++ {
+				fmt.Printf("🔁 Chưa sang được trang %d, thử lại lần %d/10 sau 10s...\n", curPos+1, retry)
+				sendStream(ctx, stream, models.StreamData{Status: fmt.Sprintf("⏳ Thuế phản hồi chậm, thử chuyển sang trang %d lại (%d/10)...", curPos+1, retry)})
+				time.Sleep(10 * time.Second)
+				c.waitTaxIdle(ctx, stream, 60*time.Second)
+				if now, _ := c.pagerPos(); now > curPos {
+					nextOK = true
+					break
+				}
+				nextOK = c.goNextPage(curPos, totPos)
+			}
+			if !nextOK {
 				if ctx.Err() != nil || c.StopRequested {
 					c.CurrentStatus = "Đã hủy"
 					return allInvoices, fmt.Errorf("thao tác đã bị hủy")
+				}
+				if c.pagerCaptchaErr != nil {
+					errCap := c.pagerCaptchaErr
+					c.CurrentStatus = "Lỗi"
+					if stream != nil {
+						stream <- models.StreamData{Status: "❌ " + errCap.Error(), IsDone: true}
+					}
+					return allInvoices, errCap
 				}
 				fmt.Printf("⚠️ Thuế không chuyển được sang trang %d (đang kẹt ở %d/%d). Dừng để tránh trang ảo!\n", curPos+1, curPos, totPos)
 				c.logError("chuyển trang", fmt.Errorf("không chuyển được sang trang %d", curPos+1), fmt.Sprintf("đã lấy %d/%d hóa đơn", len(allInvoices), totalOnTax))
@@ -1476,10 +1640,18 @@ func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toD
 	}
 
 	// 5. KẾT THÚC
+	finalStatus := "✅ Hoàn thành tra cứu!"
+	if totalOnTax > 0 && len(allInvoices) < totalOnTax {
+		finalStatus = fmt.Sprintf("⚠️ Chưa lấy hết: mới có %d/%d hóa đơn. Vui lòng tìm kiếm lại để lấy đủ", len(allInvoices), totalOnTax)
+		fmt.Println(finalStatus)
+	}
+	if len(allInvoices) > 0 {
+		c.lastDataAt = time.Now()
+	}
 	if stream != nil {
 		stream <- models.StreamData{
 			Invoices:   allInvoices,
-			Status:     "✅ Hoàn thành tra cứu!",
+			Status:     finalStatus,
 			TotalSoFar: c.TotalInvoices,
 			TotalOnTax: totalOnTax,
 			IsDone:     true,
@@ -1712,6 +1884,14 @@ func (c *CrawlerService) CrawlAllPages() {
 	c.CurrentStatus = "Bắt đầu khởi động ứng dụng..."
 	c.GrantPermissions()
 
+	// MTT: cổng thuế hỏi captcha mỗi lần đổi trang (kể cả quay về trang 1) → tự giải bằng AI (luồng này không có popup nhập tay)
+	c.pagerCaptchaErr = nil
+	c.pagerCaptchaOn = c.searchCategory == "may_tinh_tien" && captcha.Enabled()
+	c.pagerCaptchaCtx = context.Background()
+	c.pagerCaptchaStream = nil
+	c.captchaNoManual = c.pagerCaptchaOn
+	defer func() { c.pagerCaptchaOn = false; c.captchaNoManual = false }()
+
 	// Đảm bảo khi hàm kết thúc (xong hoặc lỗi) thì IsRunning phải về false và xóa sạch thư mục tạm
 	defer func() {
 		if r := recover(); r != nil {
@@ -1732,6 +1912,34 @@ func (c *CrawlerService) CrawlAllPages() {
 	c.CurrentStatus = "Đang quay về trang đầu tiên..."
 	fmt.Println("⏮️ Đang reset về trang 1 bằng nút mũi tên trái...")
 
+	// MTT: mỗi lần bấm lùi đều dính captcha → bấm Tìm kiếm lại 1 lần (chỉ 1 captcha, tự về trang 1) cho nhanh
+	if c.pagerCaptchaOn {
+		if cur, total := c.pagerPos(); total > 0 && cur > 1 {
+			fmt.Printf("🔍 Đang ở trang %d/%d → bấm Tìm kiếm lại để về trang 1 (nhanh hơn bấm lùi từng trang).\n", cur, total)
+			var lastErr error
+			for try := 1; try <= 8 && !c.StopRequested; try++ {
+				if !c.clickSearchButton() {
+					break
+				}
+				lastErr = c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, searchCaptchaAppearWait)
+				if lastErr == nil {
+					time.Sleep(1500 * time.Millisecond)
+					c.waitNotLoading(60 * time.Second)
+					break
+				}
+				// Sai captcha → bấm Tìm kiếm lại cho tới khi qua được
+				fmt.Printf("🔁 Captcha chưa qua (%v), bấm Tìm kiếm lại (%d/8)...\n", lastErr, try)
+				time.Sleep(2 * time.Second)
+			}
+			if lastErr != nil && !c.StopRequested {
+				if now, _ := c.pagerPos(); now > 1 {
+					fmt.Println("⚠️ Tìm kiếm lại chưa về được trang 1, chuyển sang bấm lùi từng trang.")
+				}
+			}
+		}
+	}
+
+	backCapFails := 0
 	for guard := 0; guard < 500; guard++ {
 		if c.StopRequested {
 			c.CurrentStatus = "Đã hủy"
@@ -1760,6 +1968,20 @@ func (c *CrawlerService) CrawlAllPages() {
 					fmt.Printf("⚠️ Không bấm được nút lùi ở trang %d.\n", cur)
 					break
 				}
+			}
+		}
+		if c.pagerCaptchaOn {
+			if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, nil, pagerCaptchaAppearWait); errCap != nil {
+				backCapFails++
+				if backCapFails >= 10 || c.StopRequested {
+					c.CurrentStatus = "Lỗi"
+					c.logError("captcha quay về trang 1", errCap, fmt.Sprintf("đang ở trang %d/%d", cur, total))
+					return
+				}
+				// Sai captcha → bấm lùi lại để cổng thuế hỏi lại
+				fmt.Printf("🔁 Captcha chưa qua (%v), bấm lùi lại (%d/10)...\n", errCap, backCapFails)
+				time.Sleep(2 * time.Second)
+				continue
 			}
 		}
 		c.waitPagerPage(cur-1, 30*time.Second)
@@ -1820,6 +2042,28 @@ func (c *CrawlerService) CrawlAllPages() {
 			break
 		}
 
+		downloadRow := func(i int, row *rod.Element) error {
+			// Hệ thống thuế hay chậm/lỗi: thử lại tối đa 3 lần, mỗi lần chờ trang thuế rảnh rồi mới tải
+			var err error
+			for attempt := 1; attempt <= 3; attempt++ {
+				if c.StopRequested {
+					return fmt.Errorf("tiến trình đã bị người dùng dừng")
+				}
+				c.waitNotLoading(45 * time.Second)
+				err = c.ProcessDownloadInvoice(row, i)
+				if err == nil {
+					return nil
+				}
+				fmt.Printf("   ⚠️ Dòng %d lỗi (lần %d/3): %v\n", i+1, attempt, err)
+				if attempt < 3 {
+					c.CurrentStatus = fmt.Sprintf("Hệ thống thuế phản hồi chậm, đang thử lại (%d/3)...", attempt+1)
+					time.Sleep(3 * time.Second)
+				}
+			}
+			return err
+		}
+
+		var failedIdx []int
 		for i, row := range rows {
 			if c.StopRequested {
 				c.CurrentStatus = "Đã hủy"
@@ -1830,32 +2074,45 @@ func (c *CrawlerService) CrawlAllPages() {
 			c.CurrentStatus = fmt.Sprintf("Trang %d: Đang tải dòng %d/%d", page, i+1, len(rows))
 			fmt.Printf("   🔍 %s...\n", c.CurrentStatus)
 
-			// Hệ thống thuế hay chậm/lỗi: thử lại tối đa 3 lần, mỗi lần chờ trang thuế rảnh rồi mới tải
-			var err error
-			for attempt := 1; attempt <= 3; attempt++ {
-				if c.StopRequested {
-					err = fmt.Errorf("tiến trình đã bị người dùng dừng")
-					break
-				}
-				c.waitNotLoading(45 * time.Second)
-				err = c.ProcessDownloadInvoice(row, i)
-				if err == nil {
-					break
-				}
-				fmt.Printf("   ⚠️ Dòng %d lỗi (lần %d/3): %v\n", i+1, attempt, err)
-				if attempt < 3 {
-					c.CurrentStatus = fmt.Sprintf("Hệ thống thuế phản hồi chậm, đang thử lại (%d/3)...", attempt+1)
-					time.Sleep(3 * time.Second)
-				}
-			}
-			if err != nil {
-				fmt.Printf("   ❌ Lỗi tại dòng %d sau 3 lần thử: %v\n", i+1, err)
+			if err := downloadRow(i, row); err != nil {
+				fmt.Printf("   ❌ Lỗi tại dòng %d sau 3 lần thử: %v → sẽ thử lại sau khi hết trang\n", i+1, err)
 				c.logError("tải chi tiết hóa đơn", err, fmt.Sprintf("trang %d, dòng %d/%d", page, i+1, len(rows)))
-				continue // Bỏ qua dòng này, làm dòng tiếp theo
+				failedIdx = append(failedIdx, i)
+				continue
 			}
 
 			// Tải xong 1 dòng thì tăng biến đếm tổng
 			c.TotalInvoices++
+		}
+
+		// Các dòng lỗi KHÔNG bỏ qua: chờ thuế hồi phục rồi tải lại (tối đa 4 vòng) trước khi sang trang
+		for round := 1; round <= 4 && len(failedIdx) > 0 && !c.StopRequested; round++ {
+			fmt.Printf("🔁 Trang %d còn %d dòng chưa tải được, thử lại vòng %d/4 sau %ds...\n", page, len(failedIdx), round, round*10)
+			c.CurrentStatus = fmt.Sprintf("Trang %d: thử lại %d dòng lỗi (vòng %d/4)...", page, len(failedIdx), round)
+			time.Sleep(time.Duration(round*10) * time.Second)
+			c.waitNotLoading(60 * time.Second)
+
+			var stillFailed []int
+			for _, i := range failedIdx {
+				if c.StopRequested {
+					break
+				}
+				if err := downloadRow(i, rows[i]); err != nil {
+					stillFailed = append(stillFailed, i)
+					continue
+				}
+				fmt.Printf("   ✅ Dòng %d đã tải được ở vòng thử lại %d.\n", i+1, round)
+				c.TotalInvoices++
+			}
+			failedIdx = stillFailed
+		}
+		if len(failedIdx) > 0 && !c.StopRequested {
+			nums := make([]string, 0, len(failedIdx))
+			for _, i := range failedIdx {
+				nums = append(nums, strconv.Itoa(i+1))
+			}
+			fmt.Printf("❌ Trang %d vẫn còn %d dòng không tải được: %s\n", page, len(failedIdx), strings.Join(nums, ", "))
+			c.logError("tải chi tiết hóa đơn", fmt.Errorf("thiếu %d dòng", len(failedIdx)), fmt.Sprintf("trang %d, các dòng: %s", page, strings.Join(nums, ", ")))
 		}
 
 		// Chuyển sang trang kế tiếp bằng nút > cạnh ô "N / M"
@@ -1867,6 +2124,10 @@ func (c *CrawlerService) CrawlAllPages() {
 		if !c.goNextPage(cur, total) {
 			if c.StopRequested {
 				break
+			}
+			if c.pagerCaptchaErr != nil {
+				c.CurrentStatus = "Lỗi"
+				c.logError("captcha chuyển trang tải chi tiết", c.pagerCaptchaErr, fmt.Sprintf("đang ở trang %d/%d", cur, total))
 			}
 			fmt.Printf("⚠️ Không chuyển được sang trang %d (nút > của thuế không phản hồi). Dừng để tránh tải trùng!\n", cur+1)
 			c.logError("chuyển trang tải chi tiết", fmt.Errorf("không chuyển được sang trang %d", cur+1), fmt.Sprintf("đang ở trang %d/%d, nút > bị khóa", cur, total))
@@ -2021,6 +2282,19 @@ func (c *CrawlerService) goNextPage(cur, total int) bool {
 		if c.clickPagerOpt("right", force) {
 			if force {
 				fmt.Println("⚠️ Nút > của thuế bị khóa, đã ép gỡ khóa và bấm.")
+			}
+			// MTT: cổng thuế hỏi lại captcha mỗi lần chuyển trang → giải (AI / người dùng) rồi mới chờ đổi trang
+			if c.pagerCaptchaOn {
+				if errCap := c.handleSearchCaptchaWait(c.pagerCaptchaCtx, c.pagerCaptchaStream, pagerCaptchaAppearWait); errCap != nil {
+					if c.captchaNoManual && !c.StopRequested {
+						// Tải chi tiết: sai captcha / popup đóng → bấm lại nút > để cổng thuế hỏi lại, bấm cho tới khi qua được
+						fmt.Printf("🔁 Captcha chưa qua (%v), bấm chuyển trang lại...\n", errCap)
+						time.Sleep(2 * time.Second)
+						continue
+					}
+					c.pagerCaptchaErr = errCap
+					return false
+				}
 			}
 			if c.waitPagerPage(cur+1, 25*time.Second) {
 				return true

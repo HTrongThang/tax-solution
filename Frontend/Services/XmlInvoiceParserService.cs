@@ -192,20 +192,8 @@ namespace Frontend.Services
             LastParsedInvoices = result.Invoices;
             InvoiceMemoryService.Instance.SetParsedXmlInvoices(result.Invoices);
 
-            // Chỉ xóa đúng các file XML đã bóc tách THÀNH CÔNG (giữ lại file bị lọc MST/kỳ hoặc bị lỗi,
-            // KHÔNG xóa cả thư mục để tránh mất file khác của người dùng)
-            // AN TOÀN: tuyệt đối không xóa khi thư mục đích là thư mục con tự đoán (có thể là dữ liệu của người dùng)
-            if (options?.DeleteAfterParsing == true && !folderAutoSelected && !string.IsNullOrWhiteSpace(targetFolder) && Directory.Exists(targetFolder))
-            {
-                foreach (var xmlPath in successfullyParsedFiles)
-                {
-                    try { File.Delete(xmlPath); }
-                    catch (Exception exDel)
-                    {
-                        Debug.WriteLine($"[XmlInvoiceParserService] Lỗi khi xóa file '{xmlPath}': {exDel.Message}");
-                    }
-                }
-            }
+            // BẢO VỆ DỮ LIỆU: Tuyệt đối không xóa bất kỳ file XML nào trên máy của người dùng sau khi bóc tách
+            // (Đã tắt bỏ hoàn toàn việc xóa file để đảm bảo an toàn dữ liệu)
 
             result.Success = parsedCount > 0;
             result.Message = $"Đã quét {xmlFiles.Length} file: Bóc tách thành công {parsedCount} hóa đơn, bỏ qua {skippedCount} file (lọc MST/kỳ), lỗi {failedCount} file.";

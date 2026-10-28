@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"TAXSOLUTION/internal/api"
+	"TAXSOLUTION/internal/captcha"
 	"TAXSOLUTION/internal/crawler"
 	"TAXSOLUTION/internal/logger"
 
@@ -11,6 +12,9 @@ import (
 )
 
 func main() {
+	// Nạp biến môi trường từ .env
+	captcha.LoadEnv(".env", "../.env")
+
 	// 0. Tự động kiểm tra dọn dẹp file log nếu đã sang tháng mới hoặc quá hạn
 	logger.CheckMonthlyCleanup()
 

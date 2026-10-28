@@ -3,3 +3,6 @@ dist/
 .vs/
 *.exe
 output_installer/
+.env
+*.env
+__debug_bin*
