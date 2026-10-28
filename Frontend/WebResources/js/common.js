@@ -99,13 +99,18 @@ window.showAlert = function (title, message, type = 'error') {
 
     const handleKey = (e) => {
         if (e.key === 'Escape' || e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
             closeAlert();
         }
     };
     document.addEventListener('keydown', handleKey);
 
     const dismissBtn = document.getElementById('btnDismissAlert');
-    if (dismissBtn) dismissBtn.onclick = closeAlert;
+    if (dismissBtn) {
+        dismissBtn.onclick = closeAlert;
+        setTimeout(() => { dismissBtn.focus(); }, 30);
+    }
 
     const backdrop = document.getElementById('dynamicModalBackdrop');
     if (backdrop) backdrop.onclick = closeAlert;
@@ -225,8 +230,15 @@ window.showConfirm = function (optsOrTitle, message, onConfirmLegacy) {
 
     const handleKey = (e) => {
         if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
             closeModal();
             if (typeof onCancel === 'function') onCancel();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeModal();
+            if (typeof onConfirm === 'function') onConfirm();
         }
     };
     document.addEventListener('keydown', handleKey);
@@ -245,6 +257,11 @@ window.showConfirm = function (optsOrTitle, message, onConfirmLegacy) {
         closeModal();
         if (typeof onConfirm === 'function') onConfirm();
     };
+
+    setTimeout(() => {
+        const confirmBtn = document.getElementById('btnConfirmAction');
+        if (confirmBtn) confirmBtn.focus();
+    }, 30);
 };
 
 /**

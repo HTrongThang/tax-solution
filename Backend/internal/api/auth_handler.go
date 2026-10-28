@@ -28,6 +28,21 @@ func registerAuthRoutesWith(r *gin.Engine, svc func() *auth.Service) {
 			c.JSON(http.StatusOK, gin.H{"status": "success", "data": gin.H{"hwid": auth.HardwareID()}})
 		})
 		g.POST("/login", func(c *gin.Context) { authLogin(c, svc()) })
+		g.POST("/restore", func(c *gin.Context) {
+			var req struct {
+				Username       string `json:"username"`
+				FullName       string `json:"fullName"`
+				MaxTaxAccounts int    `json:"maxTaxAccounts"`
+				AllowAI        bool   `json:"allowAI"`
+				EndDate        string `json:"endDate"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
+				return
+			}
+			svc().RestoreSession(req.Username, req.FullName, req.MaxTaxAccounts, req.AllowAI, req.EndDate)
+			c.JSON(http.StatusOK, gin.H{"status": "success", "result": "OK"})
+		})
 		g.POST("/register", func(c *gin.Context) { authRegister(c, svc()) })
 		g.POST("/check", func(c *gin.Context) { authCheck(c, svc()) })
 		g.POST("/logout", func(c *gin.Context) {

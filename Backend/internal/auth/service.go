@@ -148,6 +148,20 @@ func (s *Service) Current() *Session {
 // Logout xóa phiên.
 func (s *Service) Logout() { s.clear() }
 
+// RestoreSession nạp lại phiên từ bộ nhớ cục bộ máy khách (đăng nhập siêu tốc offline).
+func (s *Service) RestoreSession(username, fullName string, maxTaxAccounts int, allowAI bool, endDate string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.session = &Session{
+		Username:       username,
+		FullName:       fullName,
+		MaxTaxAccounts: maxTaxAccounts,
+		AllowAI:        allowAI,
+		EndDate:        endDate,
+		VerifiedAt:     s.now(),
+	}
+}
+
 func (s *Service) clear() {
 	s.mu.Lock()
 	s.session = nil

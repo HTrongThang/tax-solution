@@ -79,7 +79,7 @@ func (s *CrawlerService) EnsureBrowser() error {
 	}
 	l := launcher.New().
 		Leakless(false).
-		Headless(true) // Chạy ngầm Chrome không hiện cửa sổ
+		Headless(false) // Chạy ngầm Chrome không hiện cửa sổ
 
 	// Tự tìm Chrome/Chromium/Edge được cài trên máy thay vì hardcode 1 đường dẫn duy nhất
 	var browserBin string
@@ -667,7 +667,7 @@ func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT,
 	for start := fromT; !start.After(toT); start = start.AddDate(0, 0, 10) {
 		end := start.AddDate(0, 0, 9)
 		if end.After(toT) {
-		end = toT
+			end = toT
 		}
 		chunks = append(chunks, [2]time.Time{start, end})
 	}
@@ -684,9 +684,9 @@ func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT,
 		cTo := chunk[1].Format("02/01/2006")
 		if stream != nil {
 			stream <- models.StreamData{
-				Status: fmt.Sprintf("📅 Đang tìm đoạn %d/%d (%s - %s)...", i+1, len(chunks), cFrom, cTo),
+				Status:     fmt.Sprintf("📅 Đang tìm đoạn %d/%d (%s - %s)...", i+1, len(chunks), cFrom, cTo),
 				TotalSoFar: len(allInvoices),
-				IsDone: false,
+				IsDone:     false,
 			}
 		}
 
@@ -737,11 +737,11 @@ func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT,
 
 	if stream != nil {
 		stream <- models.StreamData{
-			Status: fmt.Sprintf("Hoàn thành: tìm thấy tổng cộng %d hóa đơn qua %d đoạn!", len(allInvoices), len(chunks)),
-			Invoices: allInvoices,
+			Status:     fmt.Sprintf("Hoàn thành: tìm thấy tổng cộng %d hóa đơn qua %d đoạn!", len(allInvoices), len(chunks)),
+			Invoices:   allInvoices,
 			TotalSoFar: len(allInvoices),
 			TotalOnTax: len(allInvoices),
-			IsDone: true,
+			IsDone:     true,
 		}
 	}
 	return allInvoices, nil

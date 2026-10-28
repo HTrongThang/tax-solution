@@ -176,19 +176,70 @@ namespace Frontend.Views
                         string founderHash = "6fae104d9d8828ab82bf0842c2ba35465ebe7b6c4501beacde8735325b330035"; 
 
                         bool isFounder = (string.Equals(user, "Founder", StringComparison.OrdinalIgnoreCase) && hashedInput == founderHash);
-                        // Nhân viên: bắt buộc xác thực online qua Backend (Google Sheet). Mất mạng = không cho vào.
                         AuthResult authResult = null;
+                        bool isValidUser = false;
+
                         if (!isFounder)
                         {
-                            authResult = await _authService.LoginAsync(user, pass);
+                            // A. Kiểm tra nhanh trong SQLite cục bộ máy này (Chỉ duy nhất tài khoản này, mở 0ms)
+                            var localAcc = await _databaseService.GetLocalAccountAsync();
+                            string todayStr = DateTime.Now.ToString("yyyy-MM-dd");
+
+                            bool isSameUser = localAcc != null && string.Equals(localAcc.Username, user, StringComparison.OrdinalIgnoreCase);
+                            bool isPassMatch = isSameUser && localAcc.PasswordHash == hashedInput;
+                            bool isActive = isSameUser && localAcc.Status == "ACTIVE";
+                            bool isEndValid = isSameUser && IsEndDateValid(localAcc.EndDate);
+
+                            if (isSameUser && isPassMatch && isActive && isEndValid)
+                            {
+                                // 1. Cho vào ngay lập tức từ SQLite (0ms)!
+                                isValidUser = true;
+                                authResult = new AuthResult
+                                {
+                                    Success = true,
+                                    Result = "OK",
+                                    Username = localAcc.Username,
+                                    FullName = string.IsNullOrEmpty(localAcc.FullName) ? localAcc.Username : localAcc.FullName,
+                                    MaxTaxAccounts = localAcc.MaxTaxAccounts,
+                                    AllowAI = localAcc.AllowAI,
+                                    EndDate = localAcc.EndDate
+                                };
+
+                                // Khôi phục phiên ngầm cho Backend Go (1ms)
+                                _ = _authService.RestoreSessionAsync(localAcc.Username, localAcc.FullName, localAcc.MaxTaxAccounts, localAcc.AllowAI, localAcc.EndDate);
+                            }
+                            else
+                            {
+                                // 2. Chưa có trong SQLite hoặc mật khẩu mới / đổi tài khoản -> Bắt buộc gọi Google Sheet xác thực
+                                authResult = await _authService.LoginAsync(user, pass);
+                                isValidUser = authResult != null && authResult.Success;
+
+                                if (isValidUser)
+                                {
+                                    // Lưu thông tin của duy nhất tài khoản này vào SQLite
+                                    await _databaseService.SaveLocalAccountAsync(new LocalAccountModel
+                                    {
+                                        Username = user,
+                                        FullName = authResult.FullName,
+                                        Role = "Staff",
+                                        MaxTaxAccounts = authResult.MaxTaxAccounts,
+                                        AllowAI = authResult.AllowAI,
+                                        EndDate = authResult.EndDate,
+                                        Status = "ACTIVE",
+                                        PasswordHash = hashedInput,
+                                        LastCheckedDate = todayStr
+                                    });
+                                }
+                            }
                         }
-                        bool isValidUser = authResult != null && authResult.Success;
 
                         if (isFounder || isValidUser)
                         {
                             // A. Lưu vào Session của C# (Để xử lý Backend)
-                            UserSession.FullName = user;
+                            UserSession.Username = user;
+                            UserSession.FullName = authResult != null && !string.IsNullOrEmpty(authResult.FullName) ? authResult.FullName : user;
                             UserSession.Role = isFounder ? "ADMINISTRATOR" : "STAFF";
+                            UserSession.Status = "ACTIVE";
                             UserSession.AdminToken = isFounder ? hashedInput : "";
                             UserSession.MaxTaxAccounts = isFounder ? int.MaxValue : authResult.MaxTaxAccounts;
                             UserSession.AllowAI = isFounder || authResult.AllowAI;
@@ -295,14 +346,25 @@ namespace Frontend.Views
                         {
                             string safeName = Newtonsoft.Json.JsonConvert.ToString(u);
                             await webView21.CoreWebView2.ExecuteScriptAsync(
-                                $"if(window.lamMoiForm) lamMoiForm(); showAlert('Thành công', 'Đã cấp quyền cho tài khoản ' + {safeName}, 'success')");
+                                $"if(window.setSubmitLoading) setSubmitLoading(false); if(window.lamMoiForm) lamMoiForm(); showAlert('Thành công', 'Đã cấp quyền thành công cho tài khoản ' + {safeName} + '! Đang quay lại trang đăng nhập...', 'success'); setTimeout(function() {{ if(window.quayLaiDangNhap) quayLaiDangNhap(); }}, 1500);");
                         }
                         else
                         {
                             string msg = string.IsNullOrEmpty(createResult.Message) ? "Không cấp được tài khoản. Vui lòng thử lại." : createResult.Message;
                             await webView21.CoreWebView2.ExecuteScriptAsync(
-                                $"showAlert('Không cấp được tài khoản', {Newtonsoft.Json.JsonConvert.ToString(msg)}, 'warning')");
+                                $"if(window.setSubmitLoading) setSubmitLoading(false); showAlert('Không cấp được tài khoản', {Newtonsoft.Json.JsonConvert.ToString(msg)}, 'warning')");
                         }
+                    }
+
+                    // --- 3. QUAY LẠI TRANG ĐĂNG NHẬP ---
+                    else if (action == "NAVIGATE_TO_LOGIN")
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            this.Size = new Size(900, 600);
+                            this.CenterToScreen();
+                            webView21.CoreWebView2.Navigate("https://taxscraper.app/login.html");
+                        }));
                     }
                 }
             }
@@ -330,6 +392,21 @@ namespace Frontend.Views
             Properties.Settings.Default.PassWord = "";
             Properties.Settings.Default.Save();
         }
+
+        /// <summary>
+        /// Kiểm tra ngày hết hạn có còn hiệu lực không (tính theo ngày hiện tại của máy).
+        /// </summary>
+        public static bool IsEndDateValid(string endDate)
+        {
+            if (string.IsNullOrWhiteSpace(endDate)) return true;
+            if (DateTime.TryParseExact(endDate.Trim(), new[] { "dd/MM/yyyy", "d/M/yyyy", "yyyy-MM-dd" },
+                System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dt))
+            {
+                return DateTime.Today <= dt.Date;
+            }
+            return true;
+        }
+
         public string ComputeHash(string rawData)
         {
             using (SHA256 sha256Hash = SHA256.Create())

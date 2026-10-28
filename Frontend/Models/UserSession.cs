@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,8 +8,10 @@ namespace Frontend.Models
 {
     public static class UserSession
     {
-        public static string FullName { get; set; }
-        public static string Role { get; set; }
+        public static string Username { get; set; } = "";
+        public static string FullName { get; set; } = "";
+        public static string Role { get; set; } = "Staff";
+        public static string Status { get; set; } = "ACTIVE";
 
         // Quyền hạn của tài khoản lấy từ Google Sheet (chỉ giữ trong RAM)
         public static int MaxTaxAccounts { get; set; } = int.MaxValue;

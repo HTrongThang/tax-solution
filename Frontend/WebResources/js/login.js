@@ -1,7 +1,6 @@
 // js/login.js
 
 function guiLenhDangNhap() {
-    debugger;
     // Thêm .trim() để tránh trường hợp Thắng chỉ gõ dấu cách
     const userVal = document.getElementById('user').value.trim();
     const passVal = document.getElementById('pass').value.trim();
@@ -92,8 +91,12 @@ function guiYeuCauCapTaiKhoan() {
     }
 }
 
-document.addEventListener('keypress', function (e) {
+document.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') {
+        if (document.getElementById('dynamicModal') || document.getElementById('confirmModal')) {
+            return;
+        }
+        e.preventDefault();
         const modal = document.getElementById('register-modal');
         if (modal && !modal.classList.contains('hidden')) {
             guiYeuCauCapTaiKhoan();

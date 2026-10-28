@@ -49,8 +49,8 @@ namespace Frontend.Views
             this.Load += UserForm_Load;
             this.FormClosing += UserForm_FormClosing;
             this.FormClosed += UserForm_FormClosed;
-            _sessionCheckTimer = new System.Windows.Forms.Timer { Interval = 10 * 60 * 1000 };
-            _sessionCheckTimer.Tick += async (s, e) => await EnsureAccountValidAsync(force: true);
+            _sessionCheckTimer = new System.Windows.Forms.Timer { Interval = 60 * 60 * 1000 }; // 1 tiếng kiểm tra 1 lần xem đã sang ngày mới chưa
+            _sessionCheckTimer.Tick += async (s, e) => await CheckDailyBackgroundAsync(force: false);
             _sessionCheckTimer.Start();
         }
         private async void UserForm_Load(object sender, EventArgs e)
@@ -145,6 +145,13 @@ namespace Frontend.Views
             // 5. ĐIỀU HƯỚNG (Kiểm tra kỹ chữ User viết hoa/thường)
             // Nếu trong folder là "User" thì giữ nguyên, nếu là "user" thì phải sửa lại
             webViewUser.CoreWebView2.Navigate("https://taxscraper.app/User/dashboard.html");
+
+            // 6. Kiểm tra ngầm định kỳ 1 lần/ngày với Google Sheet (sau khi UI đã sẵn sàng 3 giây)
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                await CheckDailyBackgroundAsync(force: false);
+            });
         }
         private async Task SyncHeaderWithSession()
         {
@@ -1303,54 +1310,111 @@ namespace Frontend.Views
             return Task.CompletedTask;
         }
 
-        private async Task<bool> EnsureAccountValidAsync(bool force = false)
+        private async Task<bool> EnsureAccountValidAsync()
         {
             if (UserSession.Role == "ADMINISTRATOR") return true;
-            if (Interlocked.Exchange(ref _checkingSession, 1) == 1) return true;
+
+            // 1. Kiểm tra trạng thái trong bộ nhớ (0ms)
+            if (UserSession.Status == "LOCKED" || UserSession.Status == "EXPIRED")
+            {
+                await ExecuteScriptSerializedAsync(
+                    "if(window.showAlert) window.showAlert('Thông báo', 'Tài khoản của bạn đã bị tạm khóa hoặc hết hạn.', 'error');");
+                return false;
+            }
+
+            // 2. Kiểm tra hạn dùng EndDate (0ms)
+            if (!string.IsNullOrEmpty(UserSession.EndDate) && !MainForm.IsEndDateValid(UserSession.EndDate))
+            {
+                await ExecuteScriptSerializedAsync(
+                    $"if(window.showAlert) window.showAlert('Hết hạn', 'Tài khoản đã hết hạn sử dụng ({UserSession.EndDate}). Vui lòng liên hệ Admin.', 'error');");
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Kiểm tra định kỳ với Google Sheet đúng 1 lần mỗi ngày (chạy hoàn toàn trong nền ngầm, không block UI).
+        /// </summary>
+        private async Task CheckDailyBackgroundAsync(bool force = false)
+        {
+            if (UserSession.Role == "ADMINISTRATOR") return;
+            if (Interlocked.Exchange(ref _checkingSession, 1) == 1) return;
+
             try
             {
-                var check = await _authService.CheckAsync(force);
+                string todayStr = DateTime.Now.ToString("yyyy-MM-dd");
+                var local = await _databaseService.GetLocalAccountAsync();
+
+                // Nếu hôm nay đã kiểm tra với Google Sheet rồi và không bắt buộc (force == false) -> Không gọi Google Sheet nữa!
+                if (!force && local != null && local.LastCheckedDate == todayStr && local.Status == "ACTIVE")
+                {
+                    return;
+                }
+
+                // Gọi Google Sheet ngầm (Background)
+                var check = await _authService.CheckAsync(force: true);
+
                 if (check.Success)
                 {
+                    // Cập nhật ngày kiểm tra hôm nay và các quyền mới vào SQLite
+                    await _databaseService.UpdateLocalAccountCheckAsync(
+                        todayStr,
+                        status: "ACTIVE",
+                        maxTax: check.MaxTaxAccounts,
+                        allowAI: check.AllowAI,
+                        endDate: check.EndDate,
+                        fullName: check.FullName
+                    );
+
+                    // Cập nhật RAM
+                    UserSession.Status = "ACTIVE";
                     UserSession.MaxTaxAccounts = check.MaxTaxAccounts;
                     UserSession.AllowAI = check.AllowAI;
                     UserSession.EndDate = check.EndDate;
-                    return true;
+                    if (!string.IsNullOrEmpty(check.FullName)) UserSession.FullName = check.FullName;
+
+                    // Gửi thông tin cập nhật nếu quota thay đổi
+                    _ = PostWebMessageAsJson(new { action = "ACCOUNT_UPDATED", maxQuota = check.MaxTaxAccounts, allowAI = check.AllowAI, endDate = check.EndDate });
                 }
-
-                string reason = string.IsNullOrEmpty(check.Message)
-                    ? "Phiên làm việc đã hết hiệu lực hoặc mất kết nối."
-                    : check.Message;
-
-                if (check.Result == "NETWORK_ERROR")
+                else if (check.Result == "LOCKED" || check.Result == "EXPIRED" || check.Result == "WRONG_DEVICE")
                 {
-                    await ExecuteScriptSerializedAsync(
-                        $"if(window.showAlert) window.showAlert('Cần kết nối Internet', {JsonConvert.ToString(reason)}, 'warning');");
-                    return false;
+                    // Bị khóa từ xa trên Google Sheet!
+                    string reason = string.IsNullOrEmpty(check.Message)
+                        ? "Tài khoản của bạn đã bị khóa hoặc hết hạn bởi quản trị viên."
+                        : check.Message;
+
+                    await _databaseService.UpdateLocalAccountCheckAsync(todayStr, status: check.Result);
+                    UserSession.Status = check.Result;
+
+                    _sessionCheckTimer?.Stop();
+                    try { _searchCts?.Cancel(); } catch { }
+                    _isCrawling = false;
+                    try { await _taxService.StopTaxAsync(); } catch { }
+
+                    this.Invoke(new Action(() =>
+                    {
+                        MessageBox.Show(this, reason, "Thông báo tài khoản", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        _isForceClosing = true;
+                        this.Close();
+                    }));
                 }
-
-                _sessionCheckTimer?.Stop();
-                try { _searchCts?.Cancel(); } catch { }
-                _isCrawling = false;
-                try { await _taxService.StopTaxAsync(); } catch { }
-
-                this.Invoke(new Action(() =>
+                else
                 {
-                    MessageBox.Show(this, reason, "Thông báo tài khoản", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    _isForceClosing = true;
-                    this.Close();
-                }));
-                return false;
+                    // Lỗi mạng hoặc server bận: do đang chạy ngầm nên KHÔNG làm phiền người dùng.
+                    System.Diagnostics.Debug.WriteLine("CheckDailyBackgroundAsync network warning: " + check.Message);
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                return true;
+                System.Diagnostics.Debug.WriteLine("CheckDailyBackgroundAsync exception: " + ex.Message);
             }
             finally
             {
                 Interlocked.Exchange(ref _checkingSession, 0);
             }
         }
+
 
 
 

@@ -41,6 +41,10 @@ namespace Frontend.Services
         public Task<AuthResult> LoginAsync(string username, string password) =>
             PostAsync("/api/auth/login", new { username, password });
 
+        /// <summary>Khôi phục phiên làm việc nhanh cho Backend từ SQLite (đăng nhập siêu tốc offline).</summary>
+        public Task<AuthResult> RestoreSessionAsync(string username, string fullName, int maxTaxAccounts, bool allowAI, string endDate) =>
+            PostAsync("/api/auth/restore", new { username, fullName, maxTaxAccounts, allowAI, endDate });
+
         /// <summary>Khách gửi yêu cầu cấp tài khoản mới (lưu trạng thái PENDING + mã máy hiện tại lên Google Sheet).</summary>
         public Task<AuthResult> RegisterAsync(string username, string password, string fullName) =>
             PostAsync("/api/auth/register", new { username, password, fullName });
