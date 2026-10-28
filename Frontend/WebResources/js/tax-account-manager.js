@@ -102,23 +102,23 @@ window.renderAccountList = function () {
         container.insertAdjacentHTML('beforeend', rowHtml);
     });
 
-    const badge = document.getElementById('count_badge');
-window.updateQuotaBanner = function () {
-    const el = document.getElementById('account-quota-banner');
-    if (!el || !window.accountQuota) return;
-    const q = window.accountQuota;
-    const used = (window.tempStorage || []).length;
-    const maxStr = (q.maxTaxAccounts == null || q.maxTaxAccounts < 0) ? 'Không giới hạn' : (used + '/' + q.maxTaxAccounts + ' MST');
-    const aiBadge = q.allowAI
-        ? '<span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">🤖 AI Captcha: Có</span>'
-        : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">🤖 AI Captcha: Không</span>';
-    const expBadge = q.endDate
-        ? '<span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">⏳ Hạn: ' + escapeHtml(q.endDate) + '</span>'
-        : '';
-    el.innerHTML = '<span class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">📦 Đã lưu: ' + maxStr + '</span>' + aiBadge + expBadge;
-};
+    var badge = document.getElementById('count_badge');
+    window.updateQuotaBanner = function () {
+        const el = document.getElementById('account-quota-banner');
+        if (!el || !window.accountQuota) return;
+        const q = window.accountQuota;
+        const used = (window.tempStorage || []).length;
+        const maxStr = (q.maxTaxAccounts == null || q.maxTaxAccounts < 0) ? 'Không giới hạn' : (used + '/' + q.maxTaxAccounts + ' MST');
+        const aiBadge = q.allowAI
+            ? '<span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">🤖 AI Captcha: Có</span>'
+            : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">🤖 AI Captcha: Không</span>';
+        const expBadge = q.endDate
+            ? '<span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">⏳ Hạn: ' + escapeHtml(q.endDate) + '</span>'
+            : '';
+        el.innerHTML = '<span class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">📦 Đã lưu: ' + maxStr + '</span>' + aiBadge + expBadge;
+    };
 
-    const badge = document.getElementById('count_badge');
+    var badge = document.getElementById('count_badge');
     if (badge) badge.innerText = window.tempStorage.length;
     if (typeof window.updateQuotaBanner === 'function') window.updateQuotaBanner();
 };

@@ -72,7 +72,7 @@ func apiSearchSupported(invoiceType, category, checkResult string) bool {
 	noFilter := strings.TrimSpace(checkResult) == "" ||
 		strings.EqualFold(strings.TrimSpace(checkResult), "Tất cả")
 	return apiModeOn() &&
-		invoiceType == "ban_ra" &&
+		(invoiceType == "ban_ra" || invoiceType == "mua_vao") &&
 		category == "may_tinh_tien" &&
 		noFilter
 }
@@ -110,7 +110,11 @@ func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType string
 		defer close(streamChan)
 		defer cancel()
 		defer func() { h.Crawler.IsRunning = false }()
-		items, err := h.newAPIClient().ListInvoices(ctx, taxapi.ListParams{From: from, To: to, Kind: taxapi.Sold, Source: taxapi.MTT}, streamChan)
+		kind := taxapi.Sold
+		if invoiceType == "mua_vao" {
+			kind = taxapi.Purchase
+		}
+		items, err := h.newAPIClient().ListInvoices(ctx, taxapi.ListParams{From: from, To: to, Kind: kind, Source: taxapi.MTT}, streamChan)
 		if err != nil {
 			fmt.Printf("⚠️ [API] Lấy danh sách lỗi: %v\n", err)
 		}
