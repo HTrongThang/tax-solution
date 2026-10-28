@@ -41,7 +41,14 @@ func Enabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CAPTCHA_AI_ENABLED"))) {
 	case "false", "0", "off", "no":
 		return false
+	case "true", "1", "on", "yes":
+		return true
 	}
+	return HasKey()
+}
+
+// HasKey cho biết đã cấu hình GEMINI_API_KEY hay chưa.
+func HasKey() bool {
 	return strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != ""
 }
 

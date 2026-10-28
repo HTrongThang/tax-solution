@@ -400,7 +400,7 @@ namespace Frontend.Views
                     var compForLogin = _cachedCompanies?.FirstOrDefault(c => c.Mst == reqMst);
                     if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && await _taxService.GetCaptchaAiEnabledAsync())
                     {
-                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'Hệ thống đang tự động nhận diện Captcha và đăng nhập...', 'info');");
+                        await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'Đang xử lý Captcha và đăng nhập hệ thống...', 'info');");
                         await Task.Delay(1000); // chờ modal đăng nhập trên trang thuế render xong
 
                         // Captcha rỗng → Backend Go tự giải bằng AI (thử lại tối đa 3 lần nếu thuế báo sai mã)

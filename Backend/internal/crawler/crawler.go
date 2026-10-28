@@ -51,7 +51,16 @@ type CrawlerService struct {
 
 	// Thời điểm lần tìm kiếm gần nhất có dữ liệu (để nghỉ 5s trước khi chuyển tab)
 	lastDataAt time.Time
+
+	// Khóa tiến trình đăng nhập: trình duyệt/Page dùng chung nên mỗi lúc chỉ cho một phiên đăng nhập chạy
+	loginMu sync.Mutex
+
+	// Sau khi cổng thuế trả 429 lúc đăng nhập: không cho đăng nhập lại tới thời điểm này (thử dồn dập chỉ bị chặn lâu hơn)
+	loginCooldownUntil time.Time
 }
+
+// errLoginBusy trả về khi đang xử lý đăng nhập cho một MST khác.
+var errLoginBusy = fmt.Errorf("LOI_DANG_NHAP: Hệ thống đang xử lý đăng nhập tài khoản khác, vui lòng đợi hoàn tất rồi thử lại")
 
 // logError: Ghi lỗi 1 dòng vào %AppData%\TaxSolution\logs\error.log
 func (c *CrawlerService) logError(step string, err error, detail string) {
@@ -169,6 +178,12 @@ func (s *CrawlerService) ShowLogin() error {
 // ShowLoginDialog: Mở dialog đăng nhập trên TAB HIỆN TẠI (không mở tab mới).
 // Dùng sau SoftLogout khi page đã ở trang chủ, hoặc khi UI yêu cầu mở lại form login.
 func (s *CrawlerService) ShowLoginDialog() error {
+	// Đang có phiên đăng nhập chạy → không được reset dialog (sẽ làm nhập nhầm MST/captcha)
+	if !s.loginMu.TryLock() {
+		return errLoginBusy
+	}
+	s.loginMu.Unlock()
+
 	if s.Page == nil || s.Browser == nil {
 		return s.ShowLogin()
 	}
@@ -344,6 +359,15 @@ func (s *CrawlerService) GetCaptcha() (string, error) {
 	return "", fmt.Errorf("không thể lấy captcha: %v", lastErr)
 }
 func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
+	if !c.loginMu.TryLock() {
+		return errLoginBusy
+	}
+	defer c.loginMu.Unlock()
+
+	if wait := time.Until(c.loginCooldownUntil); wait > 0 {
+		return fmt.Errorf("LOI_DANG_NHAP: Cổng thuế đang giới hạn tốc độ (429). Vui lòng đợi khoảng %d giây rồi đăng nhập lại", int(wait.Seconds())+1)
+	}
+
 	fmt.Println("🚀 Đang thực hiện đăng nhập (Chế độ kiểm soát nghiêm ngặt)...")
 	c.CurrentTaxCode = strings.TrimSpace(user)
 
@@ -363,7 +387,7 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if isAutoSolve && attempt > 1 {
 			fmt.Printf("🔄 [Hệ thống Login] Thử lại lần %d/%d (lấy mã captcha mới và giải lại)...\n", attempt, maxAttempts)
-			time.Sleep(1 * time.Second)
+			c.prepareLoginRetry()
 		}
 
 		// --- 1. ĐIỀN THÔNG TIN ---
@@ -463,6 +487,9 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 
 		if iterErr != nil {
 			c.logError("loginTax", iterErr, iterErr.Error())
+			if c.isRateLimited(iterErr) {
+				return c.rateLimitErr()
+			}
 			if strings.Contains(iterErr.Error(), "SAI_THONG_TIN") {
 				return iterErr
 			}
@@ -487,6 +514,9 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 			msg := finalErr.Value.String()
 			loginErr := parseLoginError(msg)
 			c.logError("loginTax", loginErr, msg)
+			if c.isRateLimited(loginErr) {
+				return c.rateLimitErr()
+			}
 			if strings.Contains(loginErr.Error(), "SAI_THONG_TIN") {
 				return loginErr
 			}
@@ -506,6 +536,37 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 	timeoutErr := fmt.Errorf("LOI_DANG_NHAP: Quá thời gian chờ đăng nhập hoặc thông tin đăng nhập không hợp lệ")
 	c.logError("loginTax", timeoutErr, "Quá thời gian chờ đăng nhập")
 	return timeoutErr
+}
+
+// prepareLoginRetry chuẩn bị cho lần quét captcha tiếp theo sau khi trang thuế báo sai mã:
+// đợi thông báo lỗi cũ biến mất (để không đọc nhầm) rồi bấm ảnh captcha để đổi mã mới.
+func (c *CrawlerService) prepareLoginRetry() {
+	_ = rod.Try(func() {
+		for i := 0; i < 20; i++ {
+			res, err := c.Page.Eval(`() => document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error').length`)
+			if err != nil || res.Value.Int() == 0 {
+				break
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
+		if img, err := c.Page.Timeout(2 * time.Second).Element(".ant-modal-content img"); err == nil {
+			_ = img.Click(proto.InputMouseButtonLeft, 1)
+		}
+	})
+	time.Sleep(1 * time.Second)
+}
+
+// isRateLimited: lỗi đăng nhập do cổng thuế trả 429 (quá nhiều yêu cầu); đặt thời gian nghỉ trước khi cho đăng nhập lại.
+func (c *CrawlerService) isRateLimited(err error) bool {
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		return false
+	}
+	c.loginCooldownUntil = time.Now().Add(60 * time.Second)
+	return true
+}
+
+func (c *CrawlerService) rateLimitErr() error {
+	return fmt.Errorf("LOI_DANG_NHAP: Cổng thuế đang giới hạn tốc độ (429) do thao tác quá dày. Vui lòng đợi khoảng 1 phút rồi đăng nhập lại")
 }
 
 // parseLoginError phân loại chính xác nguyên nhân lỗi đăng nhập trang thuế
