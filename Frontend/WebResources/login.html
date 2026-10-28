@@ -78,10 +78,50 @@
             <div class="mt-10 text-center text-xs text-gray-500">
                 Chưa có quyền truy cập?
                 <a href="javascript:void(0)"
-                   onclick="showAlert('Yêu cầu cấp tài khoản', 'Vui lòng liên hệ Admin để được cấp quyền.\nSĐT: 0356.587.127 (Zalo)', 'success')"
+                   onclick="moFormDangKy()"
                    class="text-tax-blue hover:text-blue-700 font-semibold ml-1 cursor-pointer">
                     Yêu cầu cấp tài khoản
                 </a>
+            </div>
+        </div>
+    </div>
+    <!-- Modal Yêu cầu cấp tài khoản -->
+    <div id="register-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h3 class="text-lg font-bold text-gray-800">Yêu cầu cấp tài khoản</h3>
+                    <p class="text-xs text-gray-500">Thông tin sẽ gửi tới Admin để kích hoạt (Zalo: 0356.587.127)</p>
+                </div>
+                <button type="button" onclick="dongFormDangKy()" class="text-gray-400 hover:text-gray-600 p-1">✕</button>
+            </div>
+            <div class="space-y-3.5">
+                <div>
+                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Mã máy thiết bị này (Tự động lấy)</label>
+                    <input type="text" id="reg_hwid" readonly placeholder="Đang lấy mã máy..." class="tax-input font-mono bg-gray-100 text-gray-600 cursor-not-allowed" style="padding-left:0.85rem">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Họ tên / SĐT / Công ty</label>
+                    <input type="text" id="reg_fullname" placeholder="Ví dụ: Nguyễn Văn A - 0909xxxxxx" class="tax-input" style="padding-left:0.85rem">
+                </div>
+                <div>
+                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Tên đăng nhập mong muốn</label>
+                    <input type="text" id="reg_user" placeholder="Ví dụ: ketoan_congtyA" class="tax-input" style="padding-left:0.85rem">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Mật khẩu</label>
+                        <input type="password" id="reg_pass" placeholder="Mật khẩu" class="tax-input" style="padding-left:0.85rem">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Nhập lại mật khẩu</label>
+                        <input type="password" id="reg_confirm" placeholder="Xác nhận" class="tax-input" style="padding-left:0.85rem">
+                    </div>
+                </div>
+                <div class="flex items-center justify-end gap-2 pt-2">
+                    <button type="button" onclick="dongFormDangKy()" class="px-4 py-2.5 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-100">Hủy</button>
+                    <button type="button" onclick="guiYeuCauCapTaiKhoan()" class="px-5 py-2.5 rounded-lg text-xs font-semibold bg-tax-blue hover:bg-blue-700 text-white shadow">Gửi yêu cầu</button>
+                </div>
             </div>
         </div>
     </div>

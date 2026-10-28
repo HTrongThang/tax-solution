@@ -40,6 +40,17 @@ namespace Frontend.Services
                     await cmd.ExecuteNonQueryAsync();
                 }
 
+                // 1b. Thêm các cột thông tin doanh nghiệp cho DB cũ (bỏ qua lỗi nếu cột đã tồn tại)
+                foreach (var alter in SqlQueries.AddTaxAccountInfoColumns)
+                {
+                    try
+                    {
+                        using var alterCmd = new SqliteCommand(alter, conn);
+                        await alterCmd.ExecuteNonQueryAsync();
+                    }
+                    catch (SqliteException) { /* duplicate column name */ }
+                }
+
                 // 2. Tự động di chuyển dữ liệu cũ từ tax_accounts.json nếu có
                 await MigrateFromJsonIfNeeded(conn);
 
@@ -78,6 +89,10 @@ namespace Frontend.Services
                         cmd.Parameters.AddWithValue("@CompanyName", item.CompanyName ?? string.Empty);
                         // Mã hóa mật khẩu bằng DPAPI trước khi lưu
                         cmd.Parameters.AddWithValue("@PasswordEncrypted", SecurityHelper.ProtectPassword(item.Password ?? string.Empty));
+                        cmd.Parameters.AddWithValue("@Address", DBNull.Value);
+                        cmd.Parameters.AddWithValue("@TaxDepartment", DBNull.Value);
+                        cmd.Parameters.AddWithValue("@Status", DBNull.Value);
+                        cmd.Parameters.AddWithValue("@OrgType", DBNull.Value);
                         await cmd.ExecuteNonQueryAsync();
                     }
 
@@ -170,11 +185,21 @@ namespace Frontend.Services
                     // Giải mã mật khẩu bằng DPAPI để C# và Go backend có thể sử dụng
                     string plainPass = SecurityHelper.UnprotectPassword(encPass);
 
+                    string GetStr(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
+                    string createdAt = GetStr(7);
+                    string dateText = null;
+                    if (DateTime.TryParse(createdAt, out var dt)) dateText = dt.ToString("dd/MM/yyyy");
+
                     result.Add(new CompanyModel
                     {
                         Mst = mst,
                         CompanyName = companyName,
-                        Password = plainPass
+                        Password = plainPass,
+                        Address = GetStr(3),
+                        TaxDepartment = GetStr(4),
+                        Status = GetStr(5),
+                        OrgType = GetStr(6),
+                        Date = dateText
                     });
                 }
             }
@@ -208,6 +233,10 @@ namespace Frontend.Services
                 cmd.Parameters.AddWithValue("@CompanyName", company.CompanyName ?? string.Empty);
                 // Mã hóa DPAPI
                 cmd.Parameters.AddWithValue("@PasswordEncrypted", SecurityHelper.ProtectPassword(company.Password ?? string.Empty));
+                cmd.Parameters.AddWithValue("@Address", (object)company.Address ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@TaxDepartment", (object)company.TaxDepartment ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Status", (object)company.Status ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@OrgType", (object)company.OrgType ?? DBNull.Value);
 
                 await cmd.ExecuteNonQueryAsync();
             }

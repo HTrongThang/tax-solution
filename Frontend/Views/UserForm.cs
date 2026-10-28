@@ -238,7 +238,12 @@ namespace Frontend.Views
                         {
                             Mst = packet.data.mst,
                             Password = packet.data.pass,
-                            CompanyName = packet.data.company
+                            CompanyName = packet.data.company,
+                            Address = (string)packet.data.address,
+                            TaxDepartment = (string)packet.data.taxDepartment,
+                            Status = (string)packet.data.status,
+                            OrgType = (string)packet.data.orgType,
+                            Date = DateTime.Now.ToString("dd/MM/yyyy")
                         };
 
                         // 3. CẬP NHẬT RAM: Thêm vào List cache ngay lập tức để sử dụng tức thì
@@ -409,7 +414,7 @@ namespace Frontend.Views
                         if (autoStatus == "success")
                         {
                             string safeMst = JsonConvert.ToString(compForLogin.Mst);
-                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (Hệ thống tự giải Captcha)!");
+                            string safeOkMsg = JsonConvert.ToString("Đăng nhập trang thuế thành công (Hệ thống đang xử lý mã Captcha)!");
                             _ = webViewUser.CoreWebView2.ExecuteScriptAsync($"(function() {{ if(window.closeCaptcha) window.closeCaptcha(); if(window.updateLoginStatus) window.updateLoginStatus(true, {safeMst}); if(window.showAlert) window.showAlert('Thành công', {safeOkMsg}, 'success'); }})();");
                             break;
                         }
@@ -629,19 +634,36 @@ namespace Frontend.Views
                         // Phải chạy trên UI Thread vì FolderBrowserDialog là thành phần giao diện
                         this.Invoke(new Action(async () =>
                         {
-                            // Tự động lưu vào thư mục Downloads của máy tính, không mở hộp thoại
                             string defaultDownloadsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
                             if (!Directory.Exists(defaultDownloadsDir))
                             {
                                 defaultDownloadsDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
                             }
-                            var response = new
+                            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
                             {
-                                action = "OUTPUT_DIR_SELECTED",
-                                output_dir = defaultDownloadsDir,
-                                requestId = packet.requestId
-                            };
-                            await PostWebMessageAsJson(response);
+                                fbd.Description = "Chọn thư mục để lưu tệp XML và hóa đơn tải về";
+                                fbd.SelectedPath = defaultDownloadsDir;
+
+                                if (fbd.ShowDialog() == DialogResult.OK)
+                                {
+                                    await PostWebMessageAsJson(new
+                                    {
+                                        action = "OUTPUT_DIR_SELECTED",
+                                        output_dir = fbd.SelectedPath,
+                                        requestId = packet.requestId
+                                    });
+                                }
+                                else
+                                {
+                                    // Người dùng bấm Hủy: báo về để giao diện tắt trạng thái đang tải
+                                    await PostWebMessageAsJson(new
+                                    {
+                                        action = "CRAWL_ERROR",
+                                        message = "Người dùng đã hủy chọn thư mục.",
+                                        requestId = packet.requestId
+                                    });
+                                }
+                            }
                         }));
                     }
                     catch (Exception ex)
@@ -1151,6 +1173,7 @@ namespace Frontend.Views
         }
         private async Task RunStatusPolling()
         {
+            int lastTotal = 0;
             try
             {
                 while (_isCrawling)
@@ -1167,6 +1190,7 @@ namespace Frontend.Views
                             requestId = _currentCrawlRequestId
                         });
 
+                        lastTotal = statusInfo.total_invoices;
                         if (!statusInfo.is_running) _isCrawling = false;
                     }
                     if (_isCrawling) await Task.Delay(1000);
@@ -1188,7 +1212,7 @@ namespace Frontend.Views
                             action = "CRAWL_STATUS_UPDATE",
                             status = "Đang bóc tách chi tiết dữ liệu XML...",
                             is_running = true,
-                            total_invoices = 0,
+                            total_invoices = lastTotal,
                             requestId = _currentCrawlRequestId
                         });
 
@@ -1221,6 +1245,7 @@ namespace Frontend.Views
                     action = "CRAWL_FINISHED",
                     requestId = _currentCrawlRequestId,
                     output_dir = _currentCrawlOutputDir,
+                    total_invoices = lastTotal,
                     total_files_found = parseResult?.TotalFilesFound ?? 0,
                     parsed_xml_count = parseResult?.TotalFilesParsed ?? 0,
                     total_files_skipped = parseResult?.TotalFilesSkipped ?? 0,

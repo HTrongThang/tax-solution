@@ -17,6 +17,11 @@ type Item struct {
 	SHDon    any     `json:"shdon"`
 	TDLap    string  `json:"tdlap"`
 	NBTen    string  `json:"nbten"`
+	NBDChi   string  `json:"nbdchi"`
+	NMMST    string  `json:"nmmst"`
+	NMTen    string  `json:"nmten"`
+	NMTNMua  string  `json:"nmtnmua"`
+	NMDChi   string  `json:"nmdchi"`
 	TgTCThue float64 `json:"tgtcthue"`
 	TgTThue  float64 `json:"tgtthue"`
 	TTCKTMai float64 `json:"ttcktmai"`
@@ -104,11 +109,30 @@ func codeText(m map[int]string, code int) string {
 
 // ToInvoice đổi một hóa đơn của cổng sang models.Invoice mà giao diện đang dùng.
 // stt: số thứ tự hiển thị (bắt đầu từ 1).
-func (it Item) ToInvoice(stt int) models.Invoice {
+func (it Item) ToInvoice(stt int, kind Kind) models.Invoice {
 	unit := it.DVTTe
 	if unit == "" {
 		unit = "VND"
 	}
+
+	// Đối tác hiển thị: bán ra → người mua; mua vào → người bán.
+	buyerName := it.NMTen
+	if buyerName == "" {
+		buyerName = it.NMTNMua // khách lẻ không có MST: "BÁN CHO NGƯỜI TIÊU DÙNG"
+	}
+	var info strings.Builder
+	if kind == Sold {
+		if it.NMMST != "" {
+			info.WriteString("MST người mua: " + it.NMMST + "\n")
+		}
+		info.WriteString("Tên người mua: " + buyerName + "\n")
+		info.WriteString("Địa chỉ người mua: " + it.NMDChi)
+	} else {
+		info.WriteString("MST người bán: " + it.NBMST + "\n")
+		info.WriteString("Tên người bán: " + it.NBTen + "\n")
+		info.WriteString("Địa chỉ người bán: " + it.NBDChi)
+	}
+
 	return models.Invoice{
 		STT:            fmt.Sprintf("%d", stt),
 		MSTNguoiBan:    it.NBMST,
@@ -116,7 +140,7 @@ func (it Item) ToInvoice(stt int) models.Invoice {
 		KyHieu:         it.KHHDon,
 		SoHoaDon:       fmt.Sprintf("%v", it.SHDon),
 		NgayLap:        it.dateVN("02/01/2006"),
-		ThongTinHoaDon: it.NBTen,
+		ThongTinHoaDon: info.String(),
 		TongChuaThue:   formatVND(it.TgTCThue),
 		TongTienThue:   formatVND(it.TgTThue),
 		ChietKhau:      formatVND(it.TTCKTMai),
@@ -125,5 +149,11 @@ func (it Item) ToInvoice(stt int) models.Invoice {
 		DonViTienTe:    unit,
 		TrangThai:      codeText(tthaiText, it.TThai),
 		KetQuaXuLy:     codeText(ttxlyText, it.TTXLy),
+
+		TenNguoiBan:    it.NBTen,
+		DiaChiNguoiBan: it.NBDChi,
+		MSTNguoiMua:    it.NMMST,
+		TenNguoiMua:    buyerName,
+		DiaChiNguoiMua: it.NMDChi,
 	}
 }

@@ -35,19 +35,34 @@ namespace Frontend.Services
         /// Lấy toàn bộ danh sách tài khoản doanh nghiệp.
         /// </summary>
         public const string SelectAllTaxAccounts = @"
-            SELECT Mst, CompanyName, PasswordEncrypted 
+            SELECT Mst, CompanyName, PasswordEncrypted, Address, TaxDepartment, Status, OrgType, CreatedAt 
             FROM TaxAccounts 
             ORDER BY Id DESC;";
+
+        /// <summary>
+        /// Các cột thông tin doanh nghiệp bổ sung (thêm bằng ALTER TABLE cho DB cũ).
+        /// </summary>
+        public static readonly string[] AddTaxAccountInfoColumns = new[]
+        {
+            "ALTER TABLE TaxAccounts ADD COLUMN Address TEXT;",
+            "ALTER TABLE TaxAccounts ADD COLUMN TaxDepartment TEXT;",
+            "ALTER TABLE TaxAccounts ADD COLUMN Status TEXT;",
+            "ALTER TABLE TaxAccounts ADD COLUMN OrgType TEXT;"
+        };
 
         /// <summary>
         /// Thêm mới hoặc cập nhật công ty (nếu trùng MST thì update thông tin mới).
         /// </summary>
         public const string UpsertTaxAccount = @"
-            INSERT INTO TaxAccounts (Mst, CompanyName, PasswordEncrypted, UpdatedAt)
-            VALUES (@Mst, @CompanyName, @PasswordEncrypted, datetime('now', 'localtime'))
+            INSERT INTO TaxAccounts (Mst, CompanyName, PasswordEncrypted, Address, TaxDepartment, Status, OrgType, UpdatedAt)
+            VALUES (@Mst, @CompanyName, @PasswordEncrypted, @Address, @TaxDepartment, @Status, @OrgType, datetime('now', 'localtime'))
             ON CONFLICT(Mst) DO UPDATE SET
                 CompanyName = excluded.CompanyName,
                 PasswordEncrypted = excluded.PasswordEncrypted,
+                Address = COALESCE(excluded.Address, TaxAccounts.Address),
+                TaxDepartment = COALESCE(excluded.TaxDepartment, TaxAccounts.TaxDepartment),
+                Status = COALESCE(excluded.Status, TaxAccounts.Status),
+                OrgType = COALESCE(excluded.OrgType, TaxAccounts.OrgType),
                 UpdatedAt = datetime('now', 'localtime');";
 
         /// <summary>

@@ -2003,11 +2003,11 @@ async function handleExportXml(btn) {
 
     // 4. Promise bao bọc toàn bộ luồng bất đồng bộ
     const promise = new Promise((resolve, reject) => {
-        // Timeout 5 phút (crawl nhiều hóa đơn có thể lâu)
+        // Timeout 30 phút (tải bù nhiều vòng + chờ khi cổng thuế giới hạn tốc độ)
         const timer = setTimeout(() => {
             try { delete window._pendingWebviewRequests[requestId]; } catch (e) { }
-            reject(new Error('Timeout — quá trình tải quá lâu (5 phút)'));
-        }, 5 * 60 * 1000);
+            reject(new Error('Timeout — quá trình tải quá lâu (30 phút)'));
+        }, 30 * 60 * 1000);
 
         window._pendingWebviewRequests[requestId] = (payload) => {
             try {

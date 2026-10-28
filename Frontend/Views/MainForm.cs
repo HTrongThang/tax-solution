@@ -19,6 +19,7 @@ namespace Frontend.Views
     public partial class MainForm : Form
     {
         private readonly DatabaseService _databaseService = new DatabaseService();
+        private readonly AuthService _authService = new AuthService();
 
         public MainForm()
         {
@@ -65,6 +66,7 @@ namespace Frontend.Views
                 // Tự động đồng bộ số phiên bản vào giao diện HTML
                 string verScript = $"document.querySelectorAll('.app-version-text').forEach(el => el.innerText = '{AppVersionHelper.DisplayVersion}');";
                 webView21.CoreWebView2.ExecuteScriptAsync(verScript);
+                _ = FillHwidToWebViewAsync();
 
                 if (Properties.Settings.Default.RememberMe)
                 {
@@ -123,6 +125,45 @@ namespace Frontend.Views
                     JsonElement root = doc.RootElement;
                     string action = root.GetProperty("action").GetString();
 
+                    // --- 0. LẤY MÃ MÁY HIỆN TẠI (HWID) ---
+                    if (action == "GET_HWID")
+                    {
+                        _ = FillHwidToWebViewAsync();
+                        return;
+                    }
+                    // --- 0b. KHÁCH GỬI YÊU CẦU CẤP TÀI KHOẢN (REGISTER_REQUEST) ---
+                    if (action == "REGISTER_REQUEST")
+                    {
+                        string u = root.TryGetProperty("username", out var uEl) ? uEl.GetString()?.Trim() ?? "" : "";
+                        string p = root.TryGetProperty("password", out var pEl) ? pEl.GetString()?.Trim() ?? "" : "";
+                        string fullName = root.TryGetProperty("fullName", out var fnEl) ? fnEl.GetString()?.Trim() ?? "" : "";
+
+                        if (string.IsNullOrEmpty(u) || string.IsNullOrEmpty(p))
+                        {
+                            await webView21.CoreWebView2.ExecuteScriptAsync(
+                                "showAlert('Thiếu thông tin', 'Vui lòng nhập đầy đủ Tên đăng nhập và Mật khẩu!', 'warning')");
+                            return;
+                        }
+
+                        var regResult = await _authService.RegisterAsync(u, p, fullName);
+                        if (regResult.Success)
+                        {
+                            string msg = string.IsNullOrEmpty(regResult.Message)
+                                ? "Đã gửi yêu cầu cấp tài khoản! Vui lòng liên hệ Admin (Zalo: 0356.587.127) để được kích hoạt."
+                                : regResult.Message;
+                            await webView21.CoreWebView2.ExecuteScriptAsync(
+                                $"if(window.dongFormDangKy) dongFormDangKy(); showAlert('Đã gửi yêu cầu', {Newtonsoft.Json.JsonConvert.ToString(msg)}, 'success')");
+                        }
+                        else
+                        {
+                            string msg = string.IsNullOrEmpty(regResult.Message)
+                                ? "Không gửi được yêu cầu. Vui lòng thử lại."
+                                : regResult.Message;
+                            await webView21.CoreWebView2.ExecuteScriptAsync(
+                                $"showAlert('Không thể đăng ký', {Newtonsoft.Json.JsonConvert.ToString(msg)}, 'warning')");
+                        }
+                        return;
+                    }
                     // --- 1. XỬ LÝ ĐĂNG NHẬP (LOGIN) ---
                     if (action == "Login")
                     {
@@ -135,21 +176,31 @@ namespace Frontend.Views
                         string founderHash = "6fae104d9d8828ab82bf0842c2ba35465ebe7b6c4501beacde8735325b330035"; 
 
                         bool isFounder = (string.Equals(user, "Founder", StringComparison.OrdinalIgnoreCase) && hashedInput == founderHash);
-                        bool isValidUser = await _databaseService.ValidateUserAsync(user, hashedInput);
+                        // Nhân viên: bắt buộc xác thực online qua Backend (Google Sheet). Mất mạng = không cho vào.
+                        AuthResult authResult = null;
+                        if (!isFounder)
+                        {
+                            authResult = await _authService.LoginAsync(user, pass);
+                        }
+                        bool isValidUser = authResult != null && authResult.Success;
 
                         if (isFounder || isValidUser)
                         {
                             // A. Lưu vào Session của C# (Để xử lý Backend)
                             UserSession.FullName = user;
                             UserSession.Role = isFounder ? "ADMINISTRATOR" : "STAFF";
+                            UserSession.AdminToken = isFounder ? hashedInput : "";
+                            UserSession.MaxTaxAccounts = isFounder ? int.MaxValue : authResult.MaxTaxAccounts;
+                            UserSession.AllowAI = isFounder || authResult.AllowAI;
+                            UserSession.EndDate = isFounder ? "" : authResult.EndDate;
                             string initials = string.IsNullOrEmpty(user) ? "U" : user.Substring(0, 1).ToUpper();
 
                             // B. Lưu vào LocalStorage của trình duyệt (Để giao diện nạp nhanh 0ms)
-                            // Sử dụng dấu backtick (`) để bao bọc giá trị chuỗi an toàn
+                            // Dùng JsonConvert.ToString để escape an toàn (tránh chèn mã JS qua tên đăng nhập)
                             string syncScript = $@"
-                    localStorage.setItem('user_name', `{UserSession.FullName}`);
-                    localStorage.setItem('user_role', `{UserSession.Role}`);
-                    localStorage.setItem('user_initials', `{initials}`);
+                    localStorage.setItem('user_name', {Newtonsoft.Json.JsonConvert.ToString(UserSession.FullName)});
+                    localStorage.setItem('user_role', {Newtonsoft.Json.JsonConvert.ToString(UserSession.Role)});
+                    localStorage.setItem('user_initials', {Newtonsoft.Json.JsonConvert.ToString(initials)});
                     console.log('TaxSolution: User data synced to LocalStorage.');
                 ";
 
@@ -171,6 +222,10 @@ namespace Frontend.Views
                                 if (isFounder)
                                 {
                                     // Chuyển hướng ngay trên WebView hiện tại sang trang quản trị
+                                    // Trang Admin có nhiều ô hơn trang Login: phóng to (không vượt quá màn hình) và căn giữa
+                                    var wa = Screen.FromControl(this).WorkingArea;
+                                    this.Size = new Size(Math.Min(1000, wa.Width - 40), Math.Min(820, wa.Height - 40));
+                                    this.Location = new Point(wa.Left + (wa.Width - this.Width) / 2, wa.Top + (wa.Height - this.Height) / 2);
                                     webView21.CoreWebView2.Navigate("https://taxscraper.app/Admin/manage_users.html");
                                 }
                                 else
@@ -188,8 +243,13 @@ namespace Frontend.Views
                         }
                         else
                         {
-                            // Thông báo lỗi nếu thông tin đăng nhập không chính xác
-                            await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Lỗi', 'Tên đăng nhập hoặc mật khẩu không đúng!', 'error')");
+                            // Thông báo đúng nguyên nhân: sai mật khẩu, chờ duyệt, bị khóa, hết hạn, sai máy, mất mạng...
+                            string loginMsg = authResult != null && !string.IsNullOrEmpty(authResult.Message)
+                                ? authResult.Message
+                                : "Tên đăng nhập hoặc mật khẩu không đúng!";
+                            string alertType = authResult == null || authResult.Result == "WRONG_CREDENTIALS" ? "error" : "warning";
+                            await webView21.CoreWebView2.ExecuteScriptAsync(
+                                $"showAlert('Không thể đăng nhập', {Newtonsoft.Json.JsonConvert.ToString(loginMsg)}, '{alertType}')");
                         }
                     }
 
@@ -198,6 +258,13 @@ namespace Frontend.Views
                     {
                         string u = root.GetProperty("username").GetString()?.Trim();
                         string p = root.GetProperty("password").GetString()?.Trim();
+
+                        // Chỉ Founder đã đăng nhập mới được cấp tài khoản
+                        if (UserSession.Role != "ADMINISTRATOR" || string.IsNullOrEmpty(UserSession.AdminToken))
+                        {
+                            await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Lỗi', 'Bạn không có quyền thực hiện thao tác này!', 'error')");
+                            return;
+                        }
 
                         if (string.IsNullOrEmpty(u) || string.IsNullOrEmpty(p))
                         {
@@ -212,21 +279,30 @@ namespace Frontend.Views
                             return;
                         }
 
-                        // Kiểm tra trùng tên nhân viên trong SQLite
-                        if (await _databaseService.UserExistsAsync(u))
+                        // Thông tin mở rộng của tài khoản
+                        string fullName = root.TryGetProperty("fullName", out var fnEl) ? fnEl.GetString()?.Trim() ?? "" : "";
+                        string hwid = root.TryGetProperty("hwid", out var hwEl) ? hwEl.GetString()?.Trim() ?? "" : "";
+                        string startDate = root.TryGetProperty("startDate", out var sdEl) ? sdEl.GetString()?.Trim() ?? "" : "";
+                        string endDate = root.TryGetProperty("endDate", out var edEl) ? edEl.GetString()?.Trim() ?? "" : "";
+                        bool allowAi = root.TryGetProperty("allowAI", out var aiEl) && aiEl.ValueKind == JsonValueKind.True;
+                        int maxTax = root.TryGetProperty("maxTaxAccounts", out var mtEl) && mtEl.TryGetInt32(out var mt) && mt >= 0 ? mt : 5;
+
+                        // Ghi lên Google Sheet qua Backend (trạng thái ACTIVE)
+                        var createResult = await _authService.AdminCreateAsync(
+                            UserSession.AdminToken, u, p, fullName, hwid, maxTax, allowAi, startDate, endDate);
+
+                        if (createResult.Success)
                         {
-                            await webView21.CoreWebView2.ExecuteScriptAsync("showAlert('Lỗi', 'Tên đăng nhập này đã tồn tại trong hệ thống!', 'warning')");
-                            return;
+                            string safeName = Newtonsoft.Json.JsonConvert.ToString(u);
+                            await webView21.CoreWebView2.ExecuteScriptAsync(
+                                $"if(window.lamMoiForm) lamMoiForm(); showAlert('Thành công', 'Đã cấp quyền cho tài khoản ' + {safeName}, 'success')");
                         }
-
-                        // Hash mật khẩu trước khi lưu trữ để bảo mật
-                        string hashedPass = ComputeHash(p);
-
-                        // Thực thi lưu vào database SQLite
-                        await _databaseService.AddUserAsync(u, hashedPass, "Staff");
-
-                        string safeName = Newtonsoft.Json.JsonConvert.ToString(u);
-                        await webView21.CoreWebView2.ExecuteScriptAsync($"showAlert('Thành công', 'Đã cấp quyền cho tài khoản ' + {safeName}, 'success')");
+                        else
+                        {
+                            string msg = string.IsNullOrEmpty(createResult.Message) ? "Không cấp được tài khoản. Vui lòng thử lại." : createResult.Message;
+                            await webView21.CoreWebView2.ExecuteScriptAsync(
+                                $"showAlert('Không cấp được tài khoản', {Newtonsoft.Json.JsonConvert.ToString(msg)}, 'warning')");
+                        }
                     }
                 }
             }
@@ -276,5 +352,18 @@ namespace Frontend.Views
         /// Giải mã mật khẩu bằng DPAPI thông qua SecurityHelper.
         /// </summary>
         public static string UnprotectPassword(string cipherText) => SecurityHelper.UnprotectPassword(cipherText);
+
+        private async Task FillHwidToWebViewAsync()
+        {
+            try
+            {
+                string hwid = await _authService.GetHwidAsync();
+                if (string.IsNullOrEmpty(hwid) || webView21?.CoreWebView2 == null) return;
+                string safeHwid = Newtonsoft.Json.JsonConvert.ToString(hwid);
+                string script = $"window.hardwareId = {safeHwid}; localStorage.setItem('hardware_id', {safeHwid}); var hwInput = document.getElementById('new_hwid'); if (hwInput && !hwInput.value) hwInput.value = {safeHwid}; var regHwInput = document.getElementById('reg_hwid'); if (regHwInput) regHwInput.value = {safeHwid};";
+                await webView21.CoreWebView2.ExecuteScriptAsync(script);
+            }
+            catch { }
+        }
     }
 }

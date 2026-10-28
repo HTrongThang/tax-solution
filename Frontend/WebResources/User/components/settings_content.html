@@ -31,13 +31,33 @@
                         </label>
                         <div class="relative">
                             <input type="text" id="mst_input" maxlength="14"
-                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 rounded-xl outline-none text-sm font-bold tracking-wider
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 pr-11 rounded-xl outline-none text-sm font-bold tracking-wider
                                        focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 transition-all placeholder:text-slate-300"
-                                placeholder="03xxxxxxxx"
-                                onkeypress="if(event.key === 'Enter') document.getElementById('company_input').focus()">
+                                placeholder="03xxxxxxxx" onblur="window.lookupMst && window.lookupMst(this.value)"
+                                onkeypress="if(event.key === 'Enter') { window.lookupMst && window.lookupMst(this.value); document.getElementById('company_input').focus() }">
                             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm">🆔</span>
+                            <button type="button" id="btn-lookup-mst" title="Tra cứu thông tin MST"
+                                onmousedown="event.preventDefault()"
+                                onclick="window.lookupMst && window.lookupMst(document.getElementById('mst_input').value, true)"
+                                class="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg
+                                       bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all shadow-sm">
+                                <svg id="lookup-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none"
+                                    viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
+                                </svg>
+                                <svg id="lookup-spinner" class="h-4 w-4 animate-spin hidden" viewBox="0 0 24 24"
+                                    fill="none">
+                                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"
+                                        opacity="0.3" />
+                                    <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" stroke-width="3"
+                                        stroke-linecap="round" />
+                                </svg>
+                            </button>
                         </div>
                     </div>
+                    <p id="lookup-hint" class="hidden text-[10px] font-semibold text-emerald-600 -mt-1">⏳ Đang tìm thông
+                        tin doanh nghiệp...</p>
 
                     <!-- Company Input -->
                     <div class="group">
@@ -61,10 +81,17 @@
                         </label>
                         <div class="relative">
                             <input type="password" id="pass_input"
-                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 rounded-xl outline-none text-sm tracking-widest
+                                class="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 pl-9 pr-11 rounded-xl outline-none text-sm tracking-widest
                                        focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/10 transition-all placeholder:text-slate-300"
                                 placeholder="••••••••" onkeypress="if(event.key === 'Enter') addToTempList()">
                             <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm">🔑</span>
+                            <button type="button" id="btn-toggle-pass" title="Hiện / ẩn mật khẩu"
+                                onmousedown="event.preventDefault()"
+                                onclick="window.togglePassVisibility()"
+                                class="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg
+                                       text-slate-400 hover:bg-slate-100 hover:text-emerald-600 transition-all">
+                                <span id="pass-eye-icon" class="text-sm">👁️</span>
+                            </button>
                         </div>
                     </div>
 
@@ -134,20 +161,11 @@
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="border-b border-slate-100 bg-slate-50/30">
-                                <th
-                                    class="py-3 px-4 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-12 text-center">
-                                    STT</th>
-                                <th
-                                    class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[140px]">
-                                    Mã số thuế</th>
-                                <th class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider">Tên
-                                    công ty</th>
-                                <th
-                                    class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[100px]">
-                                    Ngày thêm</th>
-                                <th
-                                    class="py-3 px-4 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[80px] text-right">
-                                    Thao tác</th>
+                                <th class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-10 text-center">STT</th>
+                                <th class="py-3 px-2 text-[10px] font-bold uppercase text-slate-400 tracking-wider">Doanh nghiệp</th>
+                                <th class="py-3 px-2 text-[10px] font-bold uppercase text-slate-400 tracking-wider">Địa chỉ / Cơ quan thuế</th>
+                                <th class="py-3 px-2 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[120px]">Trạng thái</th>
+                                <th class="py-3 px-3 text-[10px] font-bold uppercase text-slate-400 tracking-wider w-[80px] text-right">Thao tác</th>
                             </tr>
                         </thead>
                         <tbody id="temp_tax_list" class="divide-y divide-slate-50">

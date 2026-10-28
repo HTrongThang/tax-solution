@@ -22,6 +22,7 @@ func main() {
 			filepath.Join(exeDir, ".env"),
 			filepath.Join(exeDir, "..", ".env"),
 			filepath.Join(exeDir, "..", "..", ".env"),
+			filepath.Join(exeDir, "..", "..", "..", "..", "Backend", ".env"),
 		)
 	}
 	captcha.LoadEnv(envPaths...)

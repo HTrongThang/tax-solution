@@ -121,9 +121,13 @@ func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType string
 		}
 	}()
 
+	// Lắng nghe request context (client ngắt kết nối) chứ KHÔNG phải ctx nội bộ: khi tìm xong goroutine
+	// gọi cancel() ngay, nếu select theo ctx đó thì tin nhắn IsDone cuối nằm trong kênh có thể bị bỏ rơi
+	// và giao diện cứ quay "Đang tìm kiếm" mãi. Kênh đóng sau khi goroutine xong nên vòng lặp vẫn kết thúc.
+	reqCtx := c.Request.Context()
 	c.Stream(func(w io.Writer) bool {
 		select {
-		case <-ctx.Done():
+		case <-reqCtx.Done():
 			return false
 		case data, ok := <-streamChan:
 			if !ok {
@@ -149,11 +153,13 @@ func (h *Handler) apiDownloadReady(invoiceType string) []taxapi.Item {
 func (h *Handler) apiDownload(items []taxapi.Item, finalDir string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.api.setCancel(cancel)
+	// Đặt trạng thái chạy NGAY (đồng bộ) trước khi trả response: C# poll /status tức thì, nếu để trong
+	// goroutine có thể thấy is_running=false và kết thúc luôn → "không tải được".
+	h.Crawler.IsRunning = true
+	h.Crawler.StopRequested = false
+	h.Crawler.TotalInvoices = 0
 	go func() {
 		defer cancel()
-		h.Crawler.IsRunning = true
-		h.Crawler.StopRequested = false
-		h.Crawler.TotalInvoices = 0
 		h.Crawler.CurrentStatus = fmt.Sprintf("Đang tải XML 0/%d...", len(items))
 		fmt.Printf("🌐 [API] Bắt đầu tải XML %d hóa đơn vào: %s\n", len(items), finalDir)
 

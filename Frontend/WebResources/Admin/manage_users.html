@@ -15,6 +15,11 @@
             }
         }
     </script>
+    <style>
+        /* Trang Admin có nhiều ô hơn trang Login: cho thẻ tự giãn chiều cao và cuộn được */
+        body { height: auto; min-height: 100vh; overflow-y: auto; }
+        .login-card { height: auto; min-height: 540px; }
+    </style>
 </head>
 <body class="antialiased text-gray-900 bg-gray-100 min-h-screen flex items-center justify-center p-4">
 
@@ -74,6 +79,36 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                         </svg>
                     </button>
+                </div>
+
+                <div class="input-group">
+                    <input type="text" id="new_fullname" placeholder="Họ tên / SĐT / Công ty (ghi chú)" class="tax-input" style="padding-left:1rem">
+                </div>
+
+                <div class="input-group">
+                <div>
+                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Mã máy hiện tại (Hardware ID)</label>
+                    <input type="text" id="new_hwid" placeholder="Tự động lấy mã máy này (hoặc để trống)" class="tax-input font-mono" style="padding-left:1rem">
+                </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Số MST tối đa</label>
+                        <input type="number" id="new_max_tax" min="0" value="5" class="tax-input" style="padding-left:1rem">
+                    </div>
+                    <label class="flex items-end gap-2 pb-3 text-sm text-gray-600 select-none cursor-pointer">
+                        <input type="checkbox" id="new_allow_ai" class="w-4 h-4 rounded border-gray-300">
+                        Cho phép AI giải captcha
+                    </label>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Ngày bắt đầu</label>
+                        <input type="date" id="new_start" class="tax-input" style="padding-left:1rem">
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Ngày kết thúc</label>
+                        <input type="date" id="new_end" class="tax-input" style="padding-left:1rem">
+                    </div>
                 </div>
 
                 <div class="py-2"></div>

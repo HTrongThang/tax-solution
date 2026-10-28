@@ -1,4 +1,4 @@
-﻿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,5 +17,20 @@ namespace Frontend.Models
 
         [JsonProperty("pass")] 
         public string Password { get; set; }
+
+        [JsonProperty("address")]
+        public string Address { get; set; }
+
+        [JsonProperty("taxDepartment")]
+        public string TaxDepartment { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; }
+
+        [JsonProperty("orgType")]
+        public string OrgType { get; set; }
+
+        [JsonProperty("date")]
+        public string Date { get; set; }
     }
 }

@@ -30,6 +30,18 @@ func NewHandler(c *crawler.CrawlerService) *Handler {
 
 // --- ĐẶT HÀM SETUPROUTER Ở ĐÂY ---
 func SetupRouter(r *gin.Engine, h *Handler) {
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
+	registerAuthRoutes(r) // API xác thực tài khoản phần mềm (/api/auth/...)
+
 	taxRoutes := r.Group("/api/tax")
 	{
 		taxRoutes.GET("/init", h.InitTaxPage)
