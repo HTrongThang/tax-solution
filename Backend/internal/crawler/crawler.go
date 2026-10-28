@@ -79,7 +79,7 @@ func (s *CrawlerService) EnsureBrowser() error {
 	}
 	l := launcher.New().
 		Leakless(false).
-		Headless(false) // Chạy ngầm Chrome không hiện cửa sổ
+		Headless(true) // Chạy ngầm Chrome không hiện cửa sổ
 
 	// Tự tìm Chrome/Chromium/Edge được cài trên máy thay vì hardcode 1 đường dẫn duy nhất
 	var browserBin string

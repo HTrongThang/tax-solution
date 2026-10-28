@@ -36,6 +36,7 @@ $env:CGO_ENABLED = "0"
 go build -ldflags="-s -w" -o "$OUTPUT\TaxBot.exe" ./cmd
 if ($LASTEXITCODE -ne 0) { Write-Host "Go build failed!" -ForegroundColor Red; exit 1 }
 Copy-Item "$OUTPUT\TaxBot.exe" "$ROOT\Backend\TaxBot.exe" -Force
+if (Test-Path "$ROOT\Backend\.env") { Copy-Item "$ROOT\Backend\.env" "$OUTPUT\.env" -Force }
 Write-Host "  OK: TaxBot.exe" -ForegroundColor DarkGreen
 Pop-Location
 
