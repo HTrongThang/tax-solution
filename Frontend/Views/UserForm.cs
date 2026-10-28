@@ -36,6 +36,9 @@ namespace Frontend.Views
         private List<dynamic> _currentInvoicesRAM = new List<dynamic>();
         // Quản lý cơ sở dữ liệu SQLite cục bộ
         private readonly DatabaseService _databaseService = new DatabaseService();
+        private readonly AuthService _authService = new AuthService();
+        private System.Windows.Forms.Timer _sessionCheckTimer;
+        private int _checkingSession = 0;
         // Semaphore để tuần tự hóa các lệnh ExecuteScriptAsync tới WebView2
         private readonly SemaphoreSlim _webviewSemaphore = new SemaphoreSlim(1, 1);
         private bool _isForceClosing = false;
@@ -46,6 +49,9 @@ namespace Frontend.Views
             this.Load += UserForm_Load;
             this.FormClosing += UserForm_FormClosing;
             this.FormClosed += UserForm_FormClosed;
+            _sessionCheckTimer = new System.Windows.Forms.Timer { Interval = 10 * 60 * 1000 };
+            _sessionCheckTimer.Tick += async (s, e) => await EnsureAccountValidAsync(force: true);
+            _sessionCheckTimer.Start();
         }
         private async void UserForm_Load(object sender, EventArgs e)
         {
@@ -251,6 +257,15 @@ namespace Frontend.Views
 
                         // Kiểm tra trùng MST để tránh nạp trùng vào RAM
                         var existing = _cachedCompanies.FirstOrDefault(c => c.Mst == newCompany.Mst);
+                        // Nếu thêm mới (không phải cập nhật MST cũ) -> kiểm tra giới hạn MaxTaxAccounts của tài khoản
+                        int maxQuota = UserSession.MaxTaxAccounts;
+                        if (existing == null && maxQuota < int.MaxValue && _cachedCompanies.Count >= maxQuota)
+                        {
+                            string limitMsg = $"Tài khoản của bạn chỉ được lưu tối đa {maxQuota} mã số thuế. Vui lòng xóa bớt hoặc liên hệ Admin nâng cấp.";
+                            await SendSettingsDataToWeb();
+                            await webViewUser.CoreWebView2.ExecuteScriptAsync($"window.showAlert('Đã đạt giới hạn MST', {JsonConvert.ToString(limitMsg)}, 'warning')");
+                            break;
+                        }
                         if (existing != null)
                         {
                             _cachedCompanies.Remove(existing); // Nếu trùng thì xóa cũ thay mới
@@ -335,6 +350,11 @@ namespace Frontend.Views
                 case "SET_CAPTCHA_AI":
                     try
                     {
+                        if (!UserSession.AllowAI)
+                        {
+                            await ExecuteScriptSerializedAsync("if(window.setCaptchaAiToggle) window.setCaptchaAiToggle(false, false); if(window.showAlert) window.showAlert('Không có quyền', 'Tài khoản của bạn chưa được cấp quyền sử dụng AI giải Captcha.', 'warning');");
+                            break;
+                        }
                         bool wantEnabled = packet.data != null && (bool)packet.data.enabled;
                         bool nowEnabled = await _taxService.SetCaptchaAiEnabledAsync(wantEnabled);
                         await ExecuteScriptSerializedAsync($"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(nowEnabled ? "true" : "false")});");
@@ -403,7 +423,7 @@ namespace Frontend.Views
                     // Công tắc AI đang BẬT + có MST/mật khẩu → tự động giải captcha và đăng nhập luôn, không hiện popup
                     string reqMst = packet?.data?.taxCode;
                     var compForLogin = _cachedCompanies?.FirstOrDefault(c => c.Mst == reqMst);
-                    if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && await _taxService.GetCaptchaAiEnabledAsync())
+                    if (compForLogin != null && !string.IsNullOrEmpty(compForLogin.Password) && UserSession.AllowAI && await _taxService.GetCaptchaAiEnabledAsync())
                     {
                         await ExecuteScriptSerializedAsync("if(window.showAlert) window.showAlert('Đang đăng nhập', 'Đang xử lý Captcha và đăng nhập hệ thống...', 'info');");
                         await Task.Delay(1000); // chờ modal đăng nhập trên trang thuế render xong
@@ -568,6 +588,7 @@ namespace Frontend.Views
                 case "SEARCH_INVOICE":
                     try
                     {
+                        if (!await EnsureAccountValidAsync()) break;
                         string fromDate = packet.data.fromDate;
                         string toDate = packet.data.toDate;
                         string invoiceType = packet.data.invoiceType != null ? (string)packet.data.invoiceType : "ban_ra";
@@ -672,6 +693,7 @@ namespace Frontend.Views
                     }
                     break;
                 case "START_CRAWL":
+                    if (!await EnsureAccountValidAsync()) break;
                     string outputDir = packet?.output_dir?.ToString();
                     string requestId = packet?.requestId != null ? packet.requestId.ToString() : null;
                     string crawlMst = packet?.mst != null ? packet.mst.ToString() : "";
@@ -961,7 +983,11 @@ namespace Frontend.Views
 
                 // Gửi trạng thái công tắc AI giải captcha lên trang Cài đặt
                 bool aiOn = await _taxService.GetCaptchaAiEnabledAsync();
-                await ExecuteScriptSerializedAsync($"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(aiOn ? "true" : "false")});");
+                bool allowAi = UserSession.AllowAI;
+                bool aiEnabled = allowAi && await _taxService.GetCaptchaAiEnabledAsync();
+                int maxQuota = UserSession.MaxTaxAccounts == int.MaxValue ? -1 : UserSession.MaxTaxAccounts;
+                string safeEndDate = JsonConvert.ToString(UserSession.EndDate ?? "");
+                await ExecuteScriptSerializedAsync($"window.accountQuota = {{ maxTaxAccounts: {maxQuota}, allowAI: {(allowAi ? "true" : "false")}, endDate: {safeEndDate} }}; if(window.updateQuotaBanner) window.updateQuotaBanner(); if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(aiEnabled ? "true" : "false")}, {(allowAi ? "true" : "false")});");
             }
             catch (Exception ex)
             {
@@ -1015,6 +1041,7 @@ namespace Frontend.Views
 
         private async void UserForm_FormClosed(object sender, FormClosedEventArgs e)
         {
+            _sessionCheckTimer?.Stop();
             // Giải phóng bộ nhớ RAM hóa đơn
             InvoiceMemoryService.Instance.Clear("Đóng ứng dụng");
 
@@ -1274,6 +1301,55 @@ namespace Frontend.Views
                 }
             }
             return Task.CompletedTask;
+        }
+
+        private async Task<bool> EnsureAccountValidAsync(bool force = false)
+        {
+            if (UserSession.Role == "ADMINISTRATOR") return true;
+            if (Interlocked.Exchange(ref _checkingSession, 1) == 1) return true;
+            try
+            {
+                var check = await _authService.CheckAsync(force);
+                if (check.Success)
+                {
+                    UserSession.MaxTaxAccounts = check.MaxTaxAccounts;
+                    UserSession.AllowAI = check.AllowAI;
+                    UserSession.EndDate = check.EndDate;
+                    return true;
+                }
+
+                string reason = string.IsNullOrEmpty(check.Message)
+                    ? "Phiên làm việc đã hết hiệu lực hoặc mất kết nối."
+                    : check.Message;
+
+                if (check.Result == "NETWORK_ERROR")
+                {
+                    await ExecuteScriptSerializedAsync(
+                        $"if(window.showAlert) window.showAlert('Cần kết nối Internet', {JsonConvert.ToString(reason)}, 'warning');");
+                    return false;
+                }
+
+                _sessionCheckTimer?.Stop();
+                try { _searchCts?.Cancel(); } catch { }
+                _isCrawling = false;
+                try { await _taxService.StopTaxAsync(); } catch { }
+
+                this.Invoke(new Action(() =>
+                {
+                    MessageBox.Show(this, reason, "Thông báo tài khoản", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _isForceClosing = true;
+                    this.Close();
+                }));
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _checkingSession, 0);
+            }
         }
 
 

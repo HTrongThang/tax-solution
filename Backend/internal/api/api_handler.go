@@ -63,11 +63,25 @@ func SetupRouter(r *gin.Engine, h *Handler) {
 
 // GetCaptchaAI: trả về trạng thái công tắc giải captcha bằng AI.
 func (h *Handler) GetCaptchaAI(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"enabled": captcha.Enabled()})
+	sess := authService().Current()
+	allowed := sess == nil || sess.AllowAI
+	c.JSON(http.StatusOK, gin.H{"enabled": canUseAI(), "allowed": allowed})
+}
+
+func canUseAI() bool {
+	sess := authService().Current()
+	if sess != nil && !sess.AllowAI {
+		return false
+	}
+	return captcha.Enabled()
 }
 
 // SetCaptchaAI: bật/tắt giải captcha bằng AI (lưu vào .env).
 func (h *Handler) SetCaptchaAI(c *gin.Context) {
+	if sess := authService().Current(); sess != nil && !sess.AllowAI {
+		c.JSON(http.StatusForbidden, gin.H{"status": "error", "enabled": false, "allowed": false, "message": "Tài khoản chưa được cấp quyền AI giải Captcha."})
+		return
+	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
@@ -121,7 +135,7 @@ func (h *Handler) GetCaptcha(c *gin.Context) {
 		return
 	}
 
-	if !captcha.Enabled() {
+	if !canUseAI() {
 		c.JSON(http.StatusOK, models.Response{
 			Status:  "success",
 			Message: "Đã lấy mã captcha thành công!",
@@ -173,6 +187,14 @@ func (h *Handler) LoginTax(c *gin.Context) {
 	fmt.Printf("---> [GO] Bắt đầu quá trình Login cho MST: %s\n", req.TaxCode)
 
 	// 2. Gọi hàm Login (Bước giả lập tốn thời gian nhất)
+	// Nếu tài khoản không được cấp quyền AI nhưng gọi LoginTax với Captcha rỗng -> từ chối
+	if strings.TrimSpace(req.Captcha) == "" && !canUseAI() {
+		c.JSON(http.StatusForbidden, models.Response{
+			Status:  "error_captcha",
+			Message: "SAI_CAPTCHA: Tài khoản chưa được cấp quyền AI giải Captcha, vui lòng nhập mã Captcha thủ công.",
+		})
+		return
+	}
 	err := h.Crawler.Login(req.TaxCode, req.Password, req.Captcha)
 
 	// --- KẾT THÚC ĐO ---

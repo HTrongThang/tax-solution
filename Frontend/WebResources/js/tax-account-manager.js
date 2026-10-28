@@ -44,6 +44,7 @@ window.renderAccountList = function () {
 
     if (!window.tempStorage || window.tempStorage.length === 0) {
         container.innerHTML = `<tr><td colspan="5" class="py-10 text-center text-slate-300 text-xs italic">Chưa có dữ liệu hàng chờ...</td></tr>`;
+        if (typeof window.updateQuotaBanner === 'function') window.updateQuotaBanner();
         return;
     }
 
@@ -102,7 +103,24 @@ window.renderAccountList = function () {
     });
 
     const badge = document.getElementById('count_badge');
+window.updateQuotaBanner = function () {
+    const el = document.getElementById('account-quota-banner');
+    if (!el || !window.accountQuota) return;
+    const q = window.accountQuota;
+    const used = (window.tempStorage || []).length;
+    const maxStr = (q.maxTaxAccounts == null || q.maxTaxAccounts < 0) ? 'Không giới hạn' : (used + '/' + q.maxTaxAccounts + ' MST');
+    const aiBadge = q.allowAI
+        ? '<span class="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">🤖 AI Captcha: Có</span>'
+        : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">🤖 AI Captcha: Không</span>';
+    const expBadge = q.endDate
+        ? '<span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">⏳ Hạn: ' + escapeHtml(q.endDate) + '</span>'
+        : '';
+    el.innerHTML = '<span class="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">📦 Đã lưu: ' + maxStr + '</span>' + aiBadge + expBadge;
+};
+
+    const badge = document.getElementById('count_badge');
     if (badge) badge.innerText = window.tempStorage.length;
+    if (typeof window.updateQuotaBanner === 'function') window.updateQuotaBanner();
 };
 
 // --- 2. HÀM THÊM MỚI / CẬP NHẬT ---
@@ -125,6 +143,10 @@ window.addToTempList = function () {
     }
 
     // Kiểm tra trùng (chỉ khi thêm mới, không phải sửa)
+    if (!editingMst && window.accountQuota && window.accountQuota.maxTaxAccounts >= 0 && tempStorage.length >= window.accountQuota.maxTaxAccounts) {
+        window.showAlert("Đã đạt giới hạn MST", "Tài khoản của bạn chỉ được lưu tối đa " + window.accountQuota.maxTaxAccounts + " mã số thuế. Vui lòng xóa bớt hoặc liên hệ Admin nâng cấp.", "warning");
+        return;
+    }
     if (!editingMst && tempStorage.some(item => item.mst === mst)) {
         window.showAlert("Trùng lặp", "Mã số thuế này đã tồn tại trong hệ thống!", "error");
         return;
@@ -276,7 +298,15 @@ window.deleteAccount = function (mst) {
 };
 
 // ===== Công tắc bật/tắt giải Captcha bằng AI =====
-window.setCaptchaAiToggle = function (enabled) {
+window.setCaptchaAiToggle = function (enabled, allowed) {
+    const isAllowed = (allowed !== undefined) ? !!allowed : (!window.accountQuota || window.accountQuota.allowAI !== false);
+    if (!isAllowed) {
+        const t = document.getElementById('captcha-ai-toggle');
+        const s = document.getElementById('captcha-ai-status');
+        if (t) { t.checked = false; t.disabled = true; }
+        if (s) s.innerText = 'Tài khoản chưa được cấp quyền AI giải Captcha';
+        return;
+    }
     const toggle = document.getElementById('captcha-ai-toggle');
     const status = document.getElementById('captcha-ai-status');
     if (toggle) {
