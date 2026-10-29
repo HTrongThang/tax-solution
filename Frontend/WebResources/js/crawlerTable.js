@@ -1008,9 +1008,9 @@ window.handlePeriodChange = function (val) {
     if (val === 'this-month') {
         const y = now.getFullYear();
         const m = now.getMonth();
-        const lastDay = new Date(y, m + 1, 0).getDate();
         fromEl.value = `${y}-${pad(m + 1)}-01`;
-        toEl.value = `${y}-${pad(m + 1)}-${pad(lastDay)}`;
+        // Tháng này: ngày kết thúc tối đa là hôm nay (trang thuế không cho chọn ngày tương lai)
+        toEl.value = `${y}-${pad(m + 1)}-${pad(now.getDate())}`;
     } else if (val === 'last-month') {
         const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
         const m = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
@@ -1034,6 +1034,12 @@ window.handlePeriodChange = function (val) {
             fromEl.value = `${y}-10-01`;
             toEl.value = `${y}-12-31`;
         }
+    }
+
+    // Trang thuế không cho chọn ngày tương lai -> giới hạn ngày kết thúc tối đa là hôm nay
+    const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    if (toEl.value > todayStr) {
+        toEl.value = todayStr;
     }
 
     window._savePeriodState();
@@ -1884,8 +1890,13 @@ window.updateCrawlerStatus = function (data) {
             cpdSub.innerText = data.sub || data.sub_detail || data.SubDetail || '';
         }
     }
-    if (cpdCount && (total > 0 || isDone)) {
-        cpdCount.innerText = total > 0 ? total : 0;
+    const totalSoFar = (data.total_so_far !== undefined) ? data.total_so_far : (data.TotalSoFar !== undefined ? data.TotalSoFar : null);
+    if (cpdCount) {
+        if (totalSoFar !== null) {
+            cpdCount.innerText = totalSoFar;
+        } else if (total > 0 || isDone) {
+            cpdCount.innerText = total > 0 ? total : 0;
+        }
     }
     if (cpdSpinner) cpdSpinner.style.display = (isDone || isError) ? 'none' : 'block';
     if (cpdDone) cpdDone.style.display = isDone ? 'flex' : 'none';

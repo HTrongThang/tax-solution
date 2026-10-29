@@ -439,8 +439,8 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 		fmt.Println("⏳ Đang quét lỗi và trạng thái hệ thống...")
 		var iterErr error
 
-		for i := 0; i < 25; i++ {
-			// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế Thắng gửi)
+		for i := 0; i < 90; i++ {
+			// ƯU TIÊN 1: KIỂM TRA THÀNH CÔNG (Dựa trên HTML Header thực tế)
 			// Check nút Logout (mũi tên phải), icon User, icon Bell
 			hasSuccess, _, _ := c.Page.Has(".anticon-arrow-right, .anticon-user, .anticon-bell")
 
@@ -453,8 +453,15 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 				return nil
 			}
 
-			// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 3 ~ 1 giây để tránh lỗi cũ)
-			if i > 2 {
+			// Nếu modal đã đóng và không ở auth page -> Thành công
+			hasModal, _, _ := c.Page.Has(".ant-modal-content")
+			if !hasModal && !isAuthPage && i > 3 {
+				fmt.Println("✅ Modal đăng nhập đã đóng - Đăng nhập thành công!")
+				return nil
+			}
+
+			// ƯU TIÊN 2: KIỂM TRA LỖI (Đợi sau vòng lặp thứ 3 ~ 1.5 giây để tránh lỗi cũ)
+			if i > 3 {
 				errText, _ := c.Page.Eval(`() => {
 					const notis = Array.from(document.querySelectorAll('.ant-notification-notice, .ant-message-error, .ant-message-notice, .ant-form-item-explain-error, .ant-alert-error'));
 					for (const n of notis) {
@@ -472,7 +479,11 @@ func (c *CrawlerService) Login(user, pass, manualCaptcha string) error {
 				}
 			}
 
-			time.Sleep(300 * time.Millisecond)
+			if i%10 == 0 && i > 0 {
+				fmt.Printf("⏳ Đang chờ hệ thống thuế phản hồi đăng nhập (%ds)...\n", (i*500)/1000)
+			}
+
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		if iterErr != nil {
@@ -652,114 +663,6 @@ func (c *CrawlerService) switchTab(exactTargetText, fallbackKeyword string, isSu
 }
 
 func (c *CrawlerService) SearchAndGetInvoices(ctx context.Context, fromDate, toDate, invoiceType, category, checkResult string, stream chan models.StreamData) ([]models.Invoice, error) {
-	if category == "may_tinh_tien" {
-		fromT, err1 := time.Parse("02/01/2006", fromDate)
-		toT, err2 := time.Parse("02/01/2006", toDate)
-		if err1 == nil && err2 == nil && toT.Sub(fromT) > 9*24*time.Hour {
-			return c.searchAndGetInvoicesChunked(ctx, fromT, toT, invoiceType, category, checkResult, stream)
-		}
-	}
-	return c.searchAndGetInvoicesSingle(ctx, fromDate, toDate, invoiceType, category, checkResult, stream)
-}
-
-func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT, toT time.Time, invoiceType, category, checkResult string, stream chan models.StreamData) ([]models.Invoice, error) {
-	var chunks [][2]time.Time
-	for start := fromT; !start.After(toT); start = start.AddDate(0, 0, 10) {
-		end := start.AddDate(0, 0, 9)
-		if end.After(toT) {
-			end = toT
-		}
-		chunks = append(chunks, [2]time.Time{start, end})
-	}
-
-	var allInvoices []models.Invoice
-	seen := make(map[string]bool)
-	totalCount := 0
-
-	for i, chunk := range chunks {
-		if ctx.Err() != nil || c.StopRequested {
-			return allInvoices, fmt.Errorf("thao tác đã bị hủy")
-		}
-		cFrom := chunk[0].Format("02/01/2006")
-		cTo := chunk[1].Format("02/01/2006")
-		if stream != nil {
-			stream <- models.StreamData{
-				Status:     fmt.Sprintf("📅 Đang tìm đoạn %d/%d (%s - %s)...", i+1, len(chunks), cFrom, cTo),
-				TotalSoFar: len(allInvoices),
-				IsDone:     false,
-			}
-		}
-
-		// Tạo sub-stream chuyển tiếp dữ liệu
-		subStream := make(chan models.StreamData, 10)
-		type resType struct {
-			invs []models.Invoice
-			err  error
-		}
-		resCh := make(chan resType, 1)
-
-		go func() {
-			defer close(subStream)
-			invs, err := c.searchAndGetInvoicesSingle(ctx, cFrom, cTo, invoiceType, category, checkResult, subStream)
-			resCh <- resType{invs: invs, err: err}
-		}()
-
-		for sub := range subStream {
-			if sub.IsDone {
-				continue
-			}
-			if stream != nil {
-				sub.Status = fmt.Sprintf("[%d/%d] (%s - %s) %s", i+1, len(chunks), cFrom, cTo, sub.Status)
-				sub.TotalSoFar = len(allInvoices) + sub.TotalSoFar
-				if sub.TotalOnTax > 0 {
-					sub.TotalOnTax = len(allInvoices) + sub.TotalOnTax
-				}
-				stream <- sub
-			}
-		}
-
-		r := <-resCh
-		if r.err != nil && !strings.Contains(r.err.Error(), "Không có kết quả") && len(r.invs) == 0 {
-			// Nếu một đoạn lỗi thực sự và chưa có dữ liệu, ngắt hoặc cảnh báo
-			fmt.Printf("⚠️ Lỗi ở đoạn %s - %s: %v\n", cFrom, cTo, r.err)
-		}
-
-		for _, inv := range r.invs {
-			key := fmt.Sprintf("%s_%s_%s", inv.MSTNguoiBan, inv.KyHieu, inv.SoHoaDon)
-			if !seen[key] {
-				seen[key] = true
-				totalCount++
-				inv.STT = fmt.Sprintf("%d", totalCount)
-				allInvoices = append(allInvoices, inv)
-			}
-		}
-
-		if stream != nil && i < len(chunks)-1 {
-			stream <- models.StreamData{
-				Status:     fmt.Sprintf("✅ Đoạn %d/%d (%s - %s): xong (%d HĐ). Chuẩn bị quét đoạn %d/%d...", i+1, len(chunks), cFrom, cTo, len(r.invs), i+2, len(chunks)),
-				TotalSoFar: len(allInvoices),
-				IsDone:     false,
-			}
-		}
-
-		if i < len(chunks)-1 {
-			time.Sleep(1500 * time.Millisecond)
-		}
-	}
-
-	if stream != nil {
-		stream <- models.StreamData{
-			Status:     fmt.Sprintf("Hoàn thành: tìm thấy tổng cộng %d hóa đơn qua %d đoạn!", len(allInvoices), len(chunks)),
-			Invoices:   allInvoices,
-			TotalSoFar: len(allInvoices),
-			TotalOnTax: len(allInvoices),
-			IsDone:     true,
-		}
-	}
-	return allInvoices, nil
-}
-
-func (c *CrawlerService) searchAndGetInvoicesSingle(ctx context.Context, fromDate, toDate, invoiceType, category, checkResult string, stream chan models.StreamData) ([]models.Invoice, error) {
 	if c.Page == nil {
 		if c.Browser == nil {
 			return nil, fmt.Errorf("browser chưa được khởi tạo")
