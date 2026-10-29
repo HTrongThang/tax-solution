@@ -699,6 +699,7 @@ func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT,
 		resCh := make(chan resType, 1)
 
 		go func() {
+			defer close(subStream)
 			invs, err := c.searchAndGetInvoicesSingle(ctx, cFrom, cTo, invoiceType, category, checkResult, subStream)
 			resCh <- resType{invs: invs, err: err}
 		}()
@@ -708,8 +709,11 @@ func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT,
 				continue
 			}
 			if stream != nil {
-				sub.Status = fmt.Sprintf("[%d/%d] %s", i+1, len(chunks), sub.Status)
+				sub.Status = fmt.Sprintf("[%d/%d] (%s - %s) %s", i+1, len(chunks), cFrom, cTo, sub.Status)
 				sub.TotalSoFar = len(allInvoices) + sub.TotalSoFar
+				if sub.TotalOnTax > 0 {
+					sub.TotalOnTax = len(allInvoices) + sub.TotalOnTax
+				}
 				stream <- sub
 			}
 		}
@@ -727,6 +731,14 @@ func (c *CrawlerService) searchAndGetInvoicesChunked(ctx context.Context, fromT,
 				totalCount++
 				inv.STT = fmt.Sprintf("%d", totalCount)
 				allInvoices = append(allInvoices, inv)
+			}
+		}
+
+		if stream != nil && i < len(chunks)-1 {
+			stream <- models.StreamData{
+				Status:     fmt.Sprintf("✅ Đoạn %d/%d (%s - %s): xong (%d HĐ). Chuẩn bị quét đoạn %d/%d...", i+1, len(chunks), cFrom, cTo, len(r.invs), i+2, len(chunks)),
+				TotalSoFar: len(allInvoices),
+				IsDone:     false,
 			}
 		}
 
@@ -1548,12 +1560,8 @@ func (c *CrawlerService) searchAndGetInvoicesSingle(ctx context.Context, fromDat
 		// Nếu đã thu thập đủ tổng số hóa đơn báo trên trang thuế -> Dừng
 		// Đã đủ số hóa đơn thuế báo → chỉ dừng khi ô "N / M" khớp (đã ở trang cuối) hoặc không đọc được ô này
 		if totalOnTax > 0 && len(allInvoices) >= totalOnTax {
-			cp, tp := c.pagerPos()
-			if tp == 0 || cp >= tp {
-				fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn (trang %d/%d). Dừng chuyển trang!\n", len(allInvoices), totalOnTax, cp, tp)
-				break
-			}
-			fmt.Printf("ℹ️ Đã đủ %d/%d hóa đơn nhưng ô trang mới %d/%d, tiếp tục sang trang kế để đến trang cuối.\n", len(allInvoices), totalOnTax, cp, tp)
+			fmt.Printf("🏁 Đã lấy đủ toàn bộ %d/%d hóa đơn. Dừng chuyển trang!\n", len(allInvoices), totalOnTax)
+			break
 		}
 
 		// Dừng theo vị trí thật "N / M" trên trang thuế (không dùng biến đếm pageIdx vì có thể lệch khi thuế chậm)
