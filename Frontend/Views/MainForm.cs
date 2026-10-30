@@ -30,12 +30,35 @@ namespace Frontend.Views
             }
             catch { }
             this.Text = $"TaxSolution - Đăng nhập ({AppVersionHelper.DisplayVersion})";
-            this.Size = new Size(900, 600);
             this.StartPosition = FormStartPosition.CenterScreen;
         }
+
+        private double GetOptimalZoomFactor()
+        {
+            double dpiScale = this.DeviceDpi / 96.0;
+            if (dpiScale >= 1.45) return 0.80;
+            if (dpiScale >= 1.20) return 0.88;
+            return 1.0;
+        }
+
+        private void ApplyDpiClientSize(int cssWidth, int cssHeight)
+        {
+            double dpiScale = this.DeviceDpi / 96.0;
+            double zoom = GetOptimalZoomFactor();
+            var wa = Screen.FromControl(this).WorkingArea;
+            int targetW = (int)Math.Round(cssWidth * dpiScale * zoom);
+            int targetH = (int)Math.Round(cssHeight * dpiScale * zoom);
+            int maxW = Math.Max(640, wa.Width - 60);
+            int maxH = Math.Max(480, wa.Height - 60);
+            this.ClientSize = new Size(Math.Min(targetW, maxW), Math.Min(targetH, maxH));
+            this.Location = new Point(wa.Left + (wa.Width - this.Width) / 2, wa.Top + (wa.Height - this.Height) / 2);
+            try { webView21.ZoomFactor = zoom; } catch { }
+        }
+
         private async void login_Load(object sender, EventArgs e)
         {
             this.Opacity = 0;
+            ApplyDpiClientSize(860, 520);
 
             // Khởi tạo SQLite DB (tự tạo bảng Users và TaxAccounts nếu chưa có)
             await _databaseService.InitializeAsync();
@@ -44,6 +67,7 @@ namespace Frontend.Views
             var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await webView21.EnsureCoreWebView2Async(env);
+            webView21.ZoomFactor = GetOptimalZoomFactor();
             await webView21.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                 $"window.appVersion = '{AppVersionHelper.DisplayVersion}'; localStorage.setItem('app_version', '{AppVersionHelper.DisplayVersion}');"
             );
@@ -273,10 +297,7 @@ namespace Frontend.Views
                                 if (isFounder)
                                 {
                                     // Chuyển hướng ngay trên WebView hiện tại sang trang quản trị
-                                    // Trang Admin có nhiều ô hơn trang Login: phóng to (không vượt quá màn hình) và căn giữa
-                                    var wa = Screen.FromControl(this).WorkingArea;
-                                    this.Size = new Size(Math.Min(1000, wa.Width - 40), Math.Min(820, wa.Height - 40));
-                                    this.Location = new Point(wa.Left + (wa.Width - this.Width) / 2, wa.Top + (wa.Height - this.Height) / 2);
+                                    ApplyDpiClientSize(900, 560);
                                     webView21.CoreWebView2.Navigate("https://taxscraper.app/Admin/manage_users.html");
                                 }
                                 else
@@ -361,8 +382,7 @@ namespace Frontend.Views
                     {
                         this.Invoke(new Action(() =>
                         {
-                            this.Size = new Size(900, 600);
-                            this.CenterToScreen();
+                            ApplyDpiClientSize(860, 520);
                             webView21.CoreWebView2.Navigate("https://taxscraper.app/login.html");
                         }));
                     }

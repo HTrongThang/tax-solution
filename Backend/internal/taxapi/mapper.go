@@ -30,12 +30,30 @@ type Item struct {
 	TThai    int     `json:"tthai"`
 	TTXLy    int     `json:"ttxly"`
 
-	Raw json.RawMessage `json:"-"`
+	Source Source          `json:"-"`
+	Raw    json.RawMessage `json:"-"`
+}
+
+// numStr chuyển số/chuỗi bất kỳ (đặc biệt float64 từ json.Unmarshal vào any) sang chuỗi nguyên,
+// tránh lỗi định dạng khoa học "1.234567e+06" khi số hóa đơn >= 1.000.000.
+func numStr(v any) string {
+	switch val := v.(type) {
+	case nil:
+		return ""
+	case float64:
+		return fmt.Sprintf("%.0f", val)
+	case json.Number:
+		return val.String()
+	case string:
+		return strings.TrimSpace(val)
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 // Key định danh duy nhất một hóa đơn (dùng để loại trùng).
 func (it Item) Key() string {
-	return fmt.Sprintf("%s|%v|%s|%v", it.NBMST, it.KHMSHDon, it.KHHDon, it.SHDon)
+	return fmt.Sprintf("%s|%s|%s|%s", it.NBMST, numStr(it.KHMSHDon), it.KHHDon, numStr(it.SHDon))
 }
 
 func parseItem(raw json.RawMessage) (Item, bool) {
@@ -52,11 +70,22 @@ var vnZone = time.FixedZone("ICT", 7*3600)
 
 // dateVN trả về ngày lập theo giờ Việt Nam với layout cho trước.
 func (it Item) dateVN(layout string) string {
-	t, err := time.Parse(time.RFC3339, it.TDLap)
-	if err != nil {
+	raw := strings.TrimSpace(it.TDLap)
+	if raw == "" {
 		return ""
 	}
-	return t.In(vnZone).Format(layout)
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.In(vnZone).Format(layout)
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t.In(vnZone).Format(layout)
+	}
+	for _, f := range []string{"2006-01-02T15:04:05", "2006-01-02", "02/01/2006"} {
+		if t, err := time.Parse(f, raw); err == nil {
+			return t.Format(layout)
+		}
+	}
+	return ""
 }
 
 // Số tiền theo định dạng vi-VN của giao diện (dấu chấm ngăn cách hàng nghìn).
@@ -95,9 +124,78 @@ var tthaiText = map[int]string{
 }
 
 var ttxlyText = map[int]string{
+	0: "Cục Thuế đã nhận",
+	1: "Đang tiến hành kiểm tra điều kiện cấp mã",
+	2: "CQT từ chối hóa đơn theo từng lần phát sinh",
+	3: "Hóa đơn đủ điều kiện cấp mã",
+	4: "Hóa đơn không đủ điều kiện cấp mã",
 	5: "Đã cấp mã hóa đơn",
-	6: "Tổng cục Thuế đã nhận không mã",
-	8: "Tổng cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền",
+	6: "Cục Thuế đã nhận không mã",
+	7: "Đã kiểm tra định kỳ HĐĐT không có mã",
+	8: "Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền",
+}
+
+// ParseCheckResult chuyển chuỗi "Kết quả kiểm tra" từ giao diện sang mã ttxly (0..8) của cổng thuế.
+// Trả về (code, true) nếu lọc theo mã cụ thể; (-1, false) nếu là "Tất cả" hoặc rỗng.
+func ParseCheckResult(s string) (int, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "Tất cả") {
+		return -1, false
+	}
+	switch s {
+	case "0", "Cục Thuế đã nhận", "Tổng cục Thuế đã nhận":
+		return 0, true
+	case "1", "Đang tiến hành kiểm tra điều kiện cấp mã":
+		return 1, true
+	case "2", "CQT từ chối hóa đơn theo từng lần phát sinh":
+		return 2, true
+	case "3", "Hóa đơn đủ điều kiện cấp mã":
+		return 3, true
+	case "4", "Hóa đơn không đủ điều kiện cấp mã":
+		return 4, true
+	case "5", "co_ma", "Đã cấp mã hóa đơn":
+		return 5, true
+	case "6", "khong_ma", "Cục Thuế đã nhận không mã", "Tổng cục Thuế đã nhận không mã":
+		return 6, true
+	case "7", "Đã kiểm tra định kỳ HĐĐT không có mã":
+		return 7, true
+	case "8", "may_tinh_tien",
+		"Cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền",
+		"Tổng cục Thuế đã nhận hóa đơn có mã khởi tạo từ máy tính tiền":
+		return 8, true
+	}
+	return -1, false
+}
+
+// ItemsFromInvoices chuyển danh sách models.Invoice (từ luồng Chrome) sang []Item để tải XML qua API.
+func ItemsFromInvoices(invs []models.Invoice, defaultSrc Source) []Item {
+	out := make([]Item, 0, len(invs))
+	for _, inv := range invs {
+		shd := strings.TrimSpace(inv.SoHoaDon)
+		if trimmed := strings.TrimLeft(shd, "0"); trimmed != "" {
+			shd = trimmed
+		}
+		ttxly := 5
+		if code, ok := ParseCheckResult(inv.KetQuaKiemTra); ok {
+			ttxly = code
+		} else if code, ok := ParseCheckResult(inv.KetQuaXuLy); ok {
+			ttxly = code
+		}
+		itemSrc := defaultSrc
+		if ttxly == 8 {
+			itemSrc = MTT
+		}
+		out = append(out, Item{
+			NBMST:    strings.TrimSpace(inv.MSTNguoiBan),
+			KHMSHDon: strings.TrimSpace(inv.KyHieuMauSo),
+			KHHDon:   strings.TrimSpace(inv.KyHieu),
+			SHDon:    shd,
+			TDLap:    strings.TrimSpace(inv.NgayLap),
+			TTXLy:    ttxly,
+			Source:   itemSrc,
+		})
+	}
+	return out
 }
 
 func codeText(m map[int]string, code int) string {
@@ -136,9 +234,9 @@ func (it Item) ToInvoice(stt int, kind Kind) models.Invoice {
 	return models.Invoice{
 		STT:            fmt.Sprintf("%d", stt),
 		MSTNguoiBan:    it.NBMST,
-		KyHieuMauSo:    fmt.Sprintf("%v", it.KHMSHDon),
+		KyHieuMauSo:    numStr(it.KHMSHDon),
 		KyHieu:         it.KHHDon,
-		SoHoaDon:       fmt.Sprintf("%v", it.SHDon),
+		SoHoaDon:       numStr(it.SHDon),
 		NgayLap:        it.dateVN("02/01/2006"),
 		ThongTinHoaDon: info.String(),
 		TongChuaThue:   formatVND(it.TgTCThue),
@@ -154,6 +252,6 @@ func (it Item) ToInvoice(stt int, kind Kind) models.Invoice {
 		DiaChiNguoiBan: it.NBDChi,
 		MSTNguoiMua:    it.NMMST,
 		TenNguoiMua:    buyerName,
-		DiaChiNguoiMua: it.NMDChi,
+		DiaChiNguoiMua: it.NBDChi,
 	}
 }

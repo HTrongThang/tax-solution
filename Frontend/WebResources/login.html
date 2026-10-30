@@ -18,21 +18,21 @@
         }
     </script>
 </head>
-<body class="antialiased text-gray-900">
+<body class="antialiased text-gray-900 select-none">
 
-    <div class="login-card">
-        <div class="w-[40%] bg-tax-dark p-10 flex flex-col justify-between text-white border-none">
+    <div class="login-card w-screen h-screen flex overflow-hidden bg-white">
+        <div class="w-[38%] bg-tax-dark p-9 flex flex-col justify-between text-white border-none">
             <div>
-                <div class="w-14 h-14 bg-tax-blue rounded-xl flex items-center justify-center mb-5 shadow-lg">
-                    <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="w-13 h-13 bg-tax-blue rounded-xl flex items-center justify-center mb-4 shadow-lg">
+                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2"></path>
                     </svg>
                 </div>
-                <h1 class="text-3xl font-bold tracking-tight mb-2">TaxScraper</h1>
-                <p class="text-blue-200 opacity-90 text-sm mb-16">Hệ thống khai thác dữ liệu <span id="login-version" class="app-version-text text-xs opacity-80 font-mono ml-1 bg-white/10 px-1.5 py-0.5 rounded"></span></p>
+                <h1 class="text-2xl font-bold tracking-tight mb-1.5">TaxScraper</h1>
+                <p class="text-blue-200 opacity-90 text-xs">Hệ thống khai thác dữ liệu <span id="login-version" class="app-version-text text-[11px] opacity-80 font-mono ml-1 bg-white/10 px-1.5 py-0.5 rounded"></span></p>
             </div>
 
-            <div class="space-y-4 text-xs text-gray-400">
+            <div class="space-y-3 text-xs text-gray-400">
                 <div class="flex items-center gap-3">
                     <div class="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
                     <p>Cập nhật dữ liệu thời gian thực</p>
@@ -44,13 +44,13 @@
             </div>
         </div>
 
-        <div class="w-[60%] bg-white p-14 flex flex-col justify-center border-none">
-            <div class="mb-8">
+        <div class="w-[62%] bg-white px-12 py-8 flex flex-col justify-center border-none">
+            <div class="mb-6">
                 <h2 class="text-2xl font-bold text-gray-800 mb-1 font-sans">Chào mừng trở lại!</h2>
                 <p class="text-gray-500 text-sm">Vui lòng đăng nhập để tiếp tục làm việc.</p>
             </div>
 
-            <div class="space-y-5">
+            <div class="space-y-4">
                 <div class="input-group">
                     <svg class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
                     <input type="text" id="user" placeholder="Tài khoản hoặc Email" class="tax-input font-sans">
@@ -61,7 +61,7 @@
                     <input type="password" id="pass" placeholder="Mật khẩu" class="tax-input font-sans">
                 </div>
 
-                <div class="flex items-center justify-between text-xs">
+                <div class="flex items-center justify-between text-xs pt-0.5">
                     <label class="flex items-center gap-2 text-gray-500 select-none cursor-pointer">
                         <input type="checkbox" id="remember" class="w-3.5 h-3.5 rounded border-gray-300 text-tax-blue focus:ring-tax-blue">
                         Duy trì đăng nhập
@@ -70,12 +70,12 @@
                 </div>
 
                 <button onclick="guiLenhDangNhap()"
-                        class="w-full bg-tax-blue hover:bg-blue-700 text-white text-sm font-semibold py-3.5 rounded-lg shadow-md transition-all duration-150 transform active:scale-[0.98]">
+                        class="w-full bg-tax-blue hover:bg-blue-700 text-white text-sm font-semibold py-3 rounded-lg shadow-md transition-all duration-150 transform active:scale-[0.98] cursor-pointer">
                     ĐĂNG NHẬP
                 </button>
             </div>
 
-            <div class="mt-10 text-center text-xs text-gray-500">
+            <div class="mt-7 text-center text-xs text-gray-500">
                 Chưa có quyền truy cập?
                 <a href="javascript:void(0)"
                    onclick="moFormDangKy()"
@@ -85,42 +85,43 @@
             </div>
         </div>
     </div>
+
     <!-- Modal Yêu cầu cấp tài khoản -->
-    <div id="register-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
-            <div class="flex items-center justify-between mb-4">
+    <div id="register-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 relative border border-slate-100">
+            <div class="flex items-center justify-between pb-3 mb-3.5 border-b border-slate-100">
                 <div>
-                    <h3 class="text-lg font-bold text-gray-800">Yêu cầu cấp tài khoản</h3>
-                    <p class="text-xs text-gray-500">Thông tin sẽ gửi tới Admin để kích hoạt (Zalo: 0356.587.127)</p>
+                    <h3 class="text-base font-bold text-gray-800">Yêu cầu cấp tài khoản</h3>
+                    <p class="text-[11px] text-gray-500 mt-0.5">Thông tin sẽ gửi tới Admin để kích hoạt (Zalo: 0356.587.127)</p>
                 </div>
-                <button type="button" onclick="dongFormDangKy()" class="text-gray-400 hover:text-gray-600 p-1">✕</button>
+                <button type="button" onclick="dongFormDangKy()" class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 cursor-pointer">✕</button>
             </div>
-            <div class="space-y-3.5">
+            <div class="space-y-3">
                 <div>
-                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Mã máy thiết bị này (Tự động lấy)</label>
-                    <input type="text" id="reg_hwid" readonly placeholder="Đang lấy mã máy..." class="tax-input font-mono bg-gray-100 text-gray-600 cursor-not-allowed" style="padding-left:0.85rem">
+                    <label class="block text-[10px] font-bold uppercase text-gray-500 tracking-wider mb-1">Mã máy thiết bị này (Tự động lấy)</label>
+                    <input type="text" id="reg_hwid" readonly placeholder="Đang lấy mã máy..." class="tax-input font-mono bg-gray-100 text-gray-600 cursor-not-allowed" style="padding:0.6rem 0.85rem">
                 </div>
                 <div>
-                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Họ tên / SĐT / Công ty</label>
-                    <input type="text" id="reg_fullname" placeholder="Ví dụ: Nguyễn Văn A - 0909xxxxxx" class="tax-input" style="padding-left:0.85rem">
+                    <label class="block text-[10px] font-bold uppercase text-gray-500 tracking-wider mb-1">Họ tên / SĐT / Công ty</label>
+                    <input type="text" id="reg_fullname" placeholder="Ví dụ: Nguyễn Văn A - 0909xxxxxx" class="tax-input" style="padding:0.6rem 0.85rem">
                 </div>
                 <div>
-                    <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Tên đăng nhập mong muốn</label>
-                    <input type="text" id="reg_user" placeholder="Ví dụ: ketoan_congtyA" class="tax-input" style="padding-left:0.85rem">
+                    <label class="block text-[10px] font-bold uppercase text-gray-500 tracking-wider mb-1">Tên đăng nhập mong muốn</label>
+                    <input type="text" id="reg_user" placeholder="Ví dụ: ketoan_congtyA" class="tax-input" style="padding:0.6rem 0.85rem">
                 </div>
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-2 gap-2.5">
                     <div>
-                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Mật khẩu</label>
-                        <input type="password" id="reg_pass" placeholder="Mật khẩu" class="tax-input" style="padding-left:0.85rem">
+                        <label class="block text-[10px] font-bold uppercase text-gray-500 tracking-wider mb-1">Mật khẩu</label>
+                        <input type="password" id="reg_pass" placeholder="Mật khẩu" class="tax-input" style="padding:0.6rem 0.85rem">
                     </div>
                     <div>
-                        <label class="text-[10px] font-bold uppercase text-gray-400 tracking-wider">Nhập lại mật khẩu</label>
-                        <input type="password" id="reg_confirm" placeholder="Xác nhận" class="tax-input" style="padding-left:0.85rem">
+                        <label class="block text-[10px] font-bold uppercase text-gray-500 tracking-wider mb-1">Nhập lại mật khẩu</label>
+                        <input type="password" id="reg_confirm" placeholder="Xác nhận" class="tax-input" style="padding:0.6rem 0.85rem">
                     </div>
                 </div>
-                <div class="flex items-center justify-end gap-2 pt-2">
-                    <button type="button" onclick="dongFormDangKy()" class="px-4 py-2.5 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-100">Hủy</button>
-                    <button type="button" onclick="guiYeuCauCapTaiKhoan()" class="px-5 py-2.5 rounded-lg text-xs font-semibold bg-tax-blue hover:bg-blue-700 text-white shadow">Gửi yêu cầu</button>
+                <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button type="button" onclick="dongFormDangKy()" class="px-4 py-2 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-100 cursor-pointer">Hủy</button>
+                    <button type="button" onclick="guiYeuCauCapTaiKhoan()" class="px-5 py-2 rounded-lg text-xs font-semibold bg-tax-blue hover:bg-blue-700 text-white shadow cursor-pointer">Gửi yêu cầu</button>
                 </div>
             </div>
         </div>

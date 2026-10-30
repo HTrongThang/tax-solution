@@ -17,33 +17,34 @@ import (
 )
 
 // Chế độ gọi thẳng API cổng thuế (thay cho điều khiển giao diện bằng Chrome).
-// Bật bằng biến môi trường / .env:  TAX_MODE=api
-// Hiện hỗ trợ: hóa đơn có mã khởi tạo từ máy tính tiền (MTT) BÁN RA, không lọc theo kết quả kiểm tra.
-// Tab "Hóa đơn điện tử" (endpoint /query) chưa kiểm chứng nên vẫn dùng luồng Chrome.
-// Các trường hợp khác tự dùng luồng Chrome như cũ.
+// Mặc định bật (hoặc cấu hình TAX_MODE=api trong .env; đặt TAX_MODE=chrome để tắt).
+// Hỗ trợ:
+//   - Tab "Hóa đơn điện tử" (/api/query/invoices/sold & /purchase) kèm toàn bộ bộ lọc Kết quả kiểm tra (ttxly==0..8).
+//   - Tab "Từ máy tính tiền" (/api/sco-query/invoices/sold & /purchase) cả Bán ra và Mua vào.
 
 // apiState là trạng thái của chế độ API: kết quả tìm kiếm gần nhất (để tải XML) và
 // hàm hủy tác vụ đang chạy.
 type apiState struct {
 	mu     sync.Mutex
 	items  []taxapi.Item
-	kind   string // "ban_ra" / "mua_vao" của lần tìm gần nhất
+	kind   string        // "ban_ra" / "mua_vao" của lần tìm gần nhất
+	source taxapi.Source // taxapi.HDDT hoặc taxapi.MTT
 	cancel context.CancelFunc
 }
 
-func (s *apiState) setItems(items []taxapi.Item, kind string) {
+func (s *apiState) setItems(items []taxapi.Item, kind string, src taxapi.Source) {
 	s.mu.Lock()
-	s.items, s.kind = items, kind
+	s.items, s.kind, s.source = items, kind, src
 	s.mu.Unlock()
 }
 
-func (s *apiState) getItems(kind string) []taxapi.Item {
+func (s *apiState) getItems(kind string) ([]taxapi.Item, taxapi.Source) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.kind != kind {
-		return nil
+	if len(s.items) == 0 {
+		return nil, ""
 	}
-	return append([]taxapi.Item(nil), s.items...)
+	return append([]taxapi.Item(nil), s.items...), s.source
 }
 
 func (s *apiState) setCancel(c context.CancelFunc) {
@@ -62,19 +63,32 @@ func (s *apiState) stop() {
 	}
 }
 
-// apiModeOn: có bật chế độ API không.
+// apiModeOn: có bật chế độ API không (mặc định bật, trừ khi đặt TAX_MODE=chrome/off/false).
 func apiModeOn() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("TAX_MODE")), "api")
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("TAX_MODE")))
+	switch mode {
+	case "chrome", "ui", "off", "false", "0":
+		return false
+	default:
+		return true
+	}
 }
 
 // apiSearchSupported: yêu cầu tìm kiếm này có thể chạy bằng API không.
 func apiSearchSupported(invoiceType, category, checkResult string) bool {
-	noFilter := strings.TrimSpace(checkResult) == "" ||
-		strings.EqualFold(strings.TrimSpace(checkResult), "Tất cả")
-	return apiModeOn() &&
-		(invoiceType == "ban_ra" || invoiceType == "mua_vao") &&
-		category == "may_tinh_tien" &&
-		noFilter
+	if !apiModeOn() {
+		return false
+	}
+	if invoiceType != "ban_ra" && invoiceType != "mua_vao" {
+		return false
+	}
+	if category == "may_tinh_tien" {
+		// Tab Máy tính tiền (/sco-query) yêu cầu giải captcha từng trang bằng AI.
+		// Nếu tài khoản không bật AI thì dùng luồng Chrome để hiện popup nhập tay.
+		return canUseAI()
+	}
+	// Tab Hóa đơn điện tử (/query): hỗ trợ tất cả Kết quả kiểm tra (Tất cả, ttxly==0..8).
+	return category == "dien_tu" || category == ""
 }
 
 func (h *Handler) newAPIClient() *taxapi.Client {
@@ -84,7 +98,7 @@ func (h *Handler) newAPIClient() *taxapi.Client {
 }
 
 // apiSearch: tìm hóa đơn bằng API và đẩy kết quả về giao diện qua SSE (cùng định dạng luồng cũ).
-func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType string) {
+func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType, category, checkResult string) {
 	from, err1 := time.Parse("02/01/2006", fromDate)
 	to, err2 := time.Parse("02/01/2006", toDate)
 	if err1 != nil || err2 != nil {
@@ -99,7 +113,7 @@ func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType string
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	h.api.setCancel(cancel)
-	h.api.setItems(nil, "")
+	h.api.setItems(nil, "", "")
 
 	h.Crawler.IsRunning = true
 	h.Crawler.StopRequested = false
@@ -110,17 +124,40 @@ func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType string
 		defer close(streamChan)
 		defer cancel()
 		defer func() { h.Crawler.IsRunning = false }()
+
 		kind := taxapi.Sold
 		if invoiceType == "mua_vao" {
 			kind = taxapi.Purchase
 		}
-		items, err := h.newAPIClient().ListInvoices(ctx, taxapi.ListParams{From: from, To: to, Kind: kind, Source: taxapi.MTT}, streamChan)
+		src := taxapi.HDDT
+		if category == "may_tinh_tien" {
+			src = taxapi.MTT
+		}
+
+		var ttxlyPtr *int
+		if src == taxapi.HDDT {
+			if code, ok := taxapi.ParseCheckResult(checkResult); ok {
+				ttxlyPtr = &code
+			} else if kind == taxapi.Purchase {
+				// Tab Mua vào bắt buộc có Kết quả kiểm tra (*) -> mặc định 5 (Đã cấp mã hóa đơn)
+				defCode := 5
+				ttxlyPtr = &defCode
+			}
+		}
+
+		items, err := h.newAPIClient().ListInvoices(ctx, taxapi.ListParams{
+			From:   from,
+			To:     to,
+			Kind:   kind,
+			Source: src,
+			TTXLy:  ttxlyPtr,
+		}, streamChan)
 		if err != nil {
 			fmt.Printf("⚠️ [API] Lấy danh sách lỗi: %v\n", err)
 		}
-		// Chỉ nhớ danh sách khi lấy trọn vẹn, để nút tải XML không tải thiếu mà không báo.
-		if err == nil {
-			h.api.setItems(items, invoiceType)
+		// Lưu danh sách hóa đơn đã lấy được để nút tải XML / Tải chi tiết sử dụng ngay
+		if len(items) > 0 {
+			h.api.setItems(items, invoiceType, src)
 			h.Crawler.TotalInvoices = len(items)
 		}
 	}()
@@ -145,16 +182,16 @@ func (h *Handler) apiSearch(c *gin.Context, fromDate, toDate, invoiceType string
 }
 
 // apiDownloadReady: có danh sách từ lần tìm bằng API để tải XML không.
-func (h *Handler) apiDownloadReady(invoiceType string) []taxapi.Item {
+func (h *Handler) apiDownloadReady(invoiceType string) ([]taxapi.Item, taxapi.Source) {
 	if !apiModeOn() {
-		return nil
+		return nil, ""
 	}
 	return h.api.getItems(invoiceType)
 }
 
 // apiDownload: tải XML của danh sách đã tìm vào finalDir (chạy ngầm). Giao diện theo dõi
 // qua /api/tax/status như luồng cũ.
-func (h *Handler) apiDownload(items []taxapi.Item, finalDir string) {
+func (h *Handler) apiDownload(items []taxapi.Item, src taxapi.Source, finalDir string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h.api.setCancel(cancel)
 	// Đặt trạng thái chạy NGAY (đồng bộ) trước khi trả response: C# poll /status tức thì, nếu để trong
@@ -162,12 +199,12 @@ func (h *Handler) apiDownload(items []taxapi.Item, finalDir string) {
 	h.Crawler.IsRunning = true
 	h.Crawler.StopRequested = false
 	h.Crawler.TotalInvoices = 0
+	h.Crawler.CurrentStatus = fmt.Sprintf("Đang tải XML 0/%d...", len(items))
 	go func() {
 		defer cancel()
-		h.Crawler.CurrentStatus = fmt.Sprintf("Đang tải XML 0/%d...", len(items))
-		fmt.Printf("🌐 [API] Bắt đầu tải XML %d hóa đơn vào: %s\n", len(items), finalDir)
+		fmt.Printf("🌐 [API] Bắt đầu tải XML %d hóa đơn (nhánh %s) vào: %s\n", len(items), src, finalDir)
 
-		ok, err := h.newAPIClient().DownloadAll(ctx, taxapi.MTT, items, finalDir, func(done, ok, total int) {
+		ok, err := h.newAPIClient().DownloadAll(ctx, src, items, finalDir, func(done, ok, total int) {
 			h.Crawler.TotalInvoices = ok
 			if failed := done - ok; failed > 0 {
 				h.Crawler.CurrentStatus = fmt.Sprintf("Đã tải %d/%d (%d hóa đơn lỗi, tự động tải lại)...", ok, total, failed)

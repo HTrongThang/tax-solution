@@ -57,7 +57,7 @@ const downloadGap = 300 * time.Millisecond
 // FileName trả về tên gốc (không đuôi) theo quy ước của app: "04_1_C26MBK_4123_01102026".
 // stt: số thứ tự dòng (bắt đầu từ 1).
 func (it Item) FileName(stt int) string {
-	return fmt.Sprintf("%02d_%v_%s_%v_%s", stt, it.KHMSHDon, it.KHHDon, it.SHDon, it.dateVN("02012006"))
+	return fmt.Sprintf("%02d_%s_%s_%s_%s", stt, numStr(it.KHMSHDon), it.KHHDon, numStr(it.SHDon), it.dateVN("02012006"))
 }
 
 // DownloadXML tải file zip của một hóa đơn (theo nhóm API src) và lưu .xml/.html vào dir, đặt tên theo FileName.
@@ -66,17 +66,40 @@ func (c *Client) DownloadXML(ctx context.Context, src Source, it Item, stt int, 
 	q := url.Values{}
 	q.Set("nbmst", it.NBMST)
 	q.Set("khhdon", it.KHHDon)
-	q.Set("shdon", fmt.Sprintf("%v", it.SHDon))
-	q.Set("khmshdon", fmt.Sprintf("%v", it.KHMSHDon))
+	q.Set("shdon", numStr(it.SHDon))
+	q.Set("khmshdon", numStr(it.KHMSHDon))
 
-	if src == "" {
-		src = MTT
+	primarySrc := it.Source
+	if primarySrc == "" {
+		primarySrc = src
 	}
-	body, err := c.get(ctx, string(src)+"/invoices/export-xml", q, false)
-	if err != nil {
-		return nil, err
+	if primarySrc == "" {
+		primarySrc = MTT
 	}
-	files, err := unzipInvoice(body)
+	// Hóa đơn có ttxly == 8 là hóa đơn khởi tạo từ máy tính tiền → ưu tiên endpoint /sco-query
+	if it.TTXLy == 8 {
+		primarySrc = MTT
+	}
+
+	tryFetch := func(s Source) (map[string][]byte, error) {
+		body, err := c.get(ctx, string(s)+"/invoices/export-xml", q, false)
+		if err != nil {
+			return nil, err
+		}
+		return unzipInvoice(body)
+	}
+
+	files, err := tryFetch(primarySrc)
+	if err != nil && ctx.Err() == nil {
+		// Thử chéo sang nhánh còn lại (/query <-> /sco-query) nếu danh sách lẫn cả 2 loại hoặc phản hồi không phải zip
+		altSrc := HDDT
+		if primarySrc == HDDT {
+			altSrc = MTT
+		}
+		if altFiles, altErr := tryFetch(altSrc); altErr == nil {
+			files, err = altFiles, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +151,8 @@ func (c *Client) DownloadAll(ctx context.Context, src Source, items []Item, dir 
 		pending[i] = i
 	}
 
+	noProgressRounds := 0
+	var lastRoundErr error
 	for round := 1; round <= maxDownloadRounds && len(pending) > 0; round++ {
 		if round > 1 {
 			wait := roundGaps[min(round-2, len(roundGaps)-1)]
@@ -136,6 +161,7 @@ func (c *Client) DownloadAll(ctx context.Context, src Source, items []Item, dir 
 				return ok, ctx.Err()
 			}
 		}
+		okBeforeRound := ok
 		var failed []int
 		for n, i := range pending {
 			if err := ctx.Err(); err != nil {
@@ -154,6 +180,7 @@ func (c *Client) DownloadAll(ctx context.Context, src Source, items []Item, dir 
 				continue
 			}
 			if _, err := c.DownloadXML(ctx, src, it, i+1, dir); err != nil {
+				lastRoundErr = err
 				c.logf("[%s] LỖI (lượt %d): %v", it.FileName(i+1), round, err)
 				failed = append(failed, i)
 				gap = min(gap*2, maxAdaptiveGap) // bị từ chối → giãn nhịp
@@ -175,9 +202,24 @@ func (c *Client) DownloadAll(ctx context.Context, src Source, items []Item, dir 
 			}
 		}
 		pending = failed
+		if len(pending) > 0 {
+			if ok == okBeforeRound {
+				noProgressRounds++
+				// Nếu 2 lượt liên tiếp không tải thêm được hóa đơn nào thì dừng sớm tránh treo 30 phút
+				if noProgressRounds >= 2 {
+					c.logf("⚠️ Dừng tải lại sau %d lượt liên tiếp không có tiến triển (còn %d hóa đơn lỗi)", noProgressRounds, len(pending))
+					break
+				}
+			} else {
+				noProgressRounds = 0
+			}
+		}
 	}
 	if len(pending) > 0 {
-		c.logf("⚠️ Còn %d hóa đơn không tải được sau %d lượt", len(pending), maxDownloadRounds)
+		c.logf("⚠️ Còn %d hóa đơn không tải được", len(pending))
+		if ok == 0 && lastRoundErr != nil {
+			return 0, lastRoundErr
+		}
 	}
 	return ok, nil
 }

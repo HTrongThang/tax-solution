@@ -15,24 +15,25 @@ type Kind string
 
 const (
 	Sold     Kind = "sold"     // bán ra
-	Purchase Kind = "purchase" // mua vào (endpoint này chưa được kiểm chứng trên cổng thật)
+	Purchase Kind = "purchase" // mua vào
 )
 
-// Source là nhóm API: hóa đơn có mã khởi tạo từ máy tính tiền (MTT) hay hóa đơn điện tử.
+// Source là nhóm API: hóa đơn có mã khởi tạo từ máy tính tiền (MTT) hay hóa đơn điện tử (HDDT).
 type Source string
 
 const (
-	MTT  Source = "/sco-query" // tab "Hóa đơn có mã khởi tạo từ máy tính tiền" (đã kiểm chứng)
-	HDDT Source = "/query"     // tab "Hóa đơn điện tử" (CHƯA kiểm chứng)
+	MTT  Source = "/sco-query" // tab "Hóa đơn có mã khởi tạo từ máy tính tiền"
+	HDDT Source = "/query"     // tab "Hóa đơn điện tử"
 )
 
 // ListParams là điều kiện lấy danh sách hóa đơn.
 type ListParams struct {
-	From, To  time.Time // theo ngày lập, tính cả ngày đầu và ngày cuối
-	Kind      Kind
-	Source    Source        // mặc định MTT
+	From, To  time.Time     // theo ngày lập, tính cả ngày đầu và ngày cuối
+	Kind      Kind          // Sold / Purchase
+	Source    Source        // MTT (/sco-query) hoặc HDDT (/query)
+	TTXLy     *int          // lọc theo kết quả kiểm tra (ttxly==0..8); nil = Tất cả
 	Size      int           // số dòng mỗi trang (mặc định 15)
-	PageDelay time.Duration // nghỉ giữa các trang (mặc định 1s)
+	PageDelay time.Duration // nghỉ giữa các trang
 }
 
 type listResp struct {
@@ -43,18 +44,19 @@ type listResp struct {
 
 const maxPages = 500
 
-// maxRangeDays: cổng thuế chỉ cho tìm tối đa 10 ngày mỗi lần với hóa đơn MTT.
-const maxRangeDays = 10
+const (
+	// maxRangeDaysMTT: cổng thuế chỉ cho tìm tối đa 10 ngày mỗi lần với hóa đơn MTT (/sco-query).
+	maxRangeDaysMTT = 10
+	// maxRangeDaysHDDT: hóa đơn điện tử (/query) cho phép tìm cả tháng (~30-31 ngày) mỗi lần.
+	maxRangeDaysHDDT = 30
+)
 
 // ListInvoices lấy toàn bộ hóa đơn trong khoảng ngày, phân trang theo `state`.
 // Mỗi trang xong sẽ đẩy một models.StreamData vào stream (nếu stream != nil); cuối cùng
 // đẩy thêm một bản IsDone=true. KHÔNG dựa vào `total` để dừng vì giá trị này dao động.
 func (c *Client) ListInvoices(ctx context.Context, p ListParams, stream chan<- models.StreamData) ([]Item, error) {
 	if p.Size <= 0 {
-		p.Size = 15
-	}
-	if p.PageDelay <= 0 {
-		p.PageDelay = time.Second
+		p.Size = 50
 	}
 	if p.Kind == "" {
 		p.Kind = Sold
@@ -62,10 +64,21 @@ func (c *Client) ListInvoices(ctx context.Context, p ListParams, stream chan<- m
 	if p.Source == "" {
 		p.Source = MTT
 	}
+	if p.PageDelay <= 0 {
+		if p.Source == HDDT {
+			p.PageDelay = 300 * time.Millisecond
+		} else {
+			p.PageDelay = time.Second
+		}
+	}
 	endpoint := string(p.Source) + "/invoices/" + string(p.Kind)
+	withCaptcha := p.Source == MTT
 
-	// Cổng thuế chỉ cho tìm tối đa maxRangeDays ngày mỗi lần (tab MTT) → chia thành các đoạn nhỏ.
-	ranges := splitDateRange(p.From, p.To, maxRangeDays)
+	maxDays := maxRangeDaysMTT
+	if p.Source == HDDT {
+		maxDays = maxRangeDaysHDDT
+	}
+	ranges := splitDateRange(p.From, p.To, maxDays)
 
 	send := func(sd models.StreamData) {
 		if stream == nil {
@@ -87,6 +100,9 @@ func (c *Client) ListInvoices(ctx context.Context, p ListParams, stream chan<- m
 	for ri, rg := range ranges {
 		search := fmt.Sprintf("tdlap=ge=%sT00:00:00;tdlap=le=%sT23:59:59",
 			rg[0].Format("02/01/2006"), rg[1].Format("02/01/2006"))
+		if p.TTXLy != nil {
+			search = fmt.Sprintf("%s;ttxly==%d", search, *p.TTXLy)
+		}
 		rangeLabel := fmt.Sprintf("đoạn %d/%d (%s - %s)", ri+1, len(ranges),
 			rg[0].Format("02/01"), rg[1].Format("02/01"))
 		state := ""
@@ -103,7 +119,7 @@ func (c *Client) ListInvoices(ctx context.Context, p ListParams, stream chan<- m
 			}
 			q.Set("search", search)
 
-			body, err := c.get(ctx, endpoint, q, true)
+			body, err := c.get(ctx, endpoint, q, withCaptcha)
 			if err != nil {
 				send(models.StreamData{CurrentPage: pageNo, TotalSoFar: len(items), TotalOnTax: totalAll + total,
 					Status: "Lỗi lấy dữ liệu: " + err.Error(), IsDone: true})
@@ -127,6 +143,11 @@ func (c *Client) ListInvoices(ctx context.Context, p ListParams, stream chan<- m
 					continue
 				}
 				seen[it.Key()] = struct{}{}
+				if it.TTXLy == 8 {
+					it.Source = MTT
+				} else {
+					it.Source = p.Source
+				}
 				items = append(items, it)
 				batch = append(batch, it.ToInvoice(len(items), p.Kind))
 			}
@@ -136,7 +157,7 @@ func (c *Client) ListInvoices(ctx context.Context, p ListParams, stream chan<- m
 			last := len(resp.Datas) < p.Size || resp.State == "" || resp.State == state
 			lastRange := ri == len(ranges)-1
 			send(models.StreamData{
-				Invoices: batch, CurrentPage: pageNo, TotalSoFar: len(items), TotalOnTax: totalAll + total,
+				CurrentPage: pageNo, TotalSoFar: len(items), TotalOnTax: totalAll + total,
 				Status: fmt.Sprintf("Đã lấy %d hóa đơn (%s)", len(items), rangeLabel),
 			})
 			if last {

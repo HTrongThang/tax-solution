@@ -1,4 +1,4 @@
-using Frontend.Models;
+﻿using Frontend.Models;
 using Frontend.Services;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
@@ -68,6 +68,8 @@ namespace Frontend.Views
             var userDataFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TaxSolution", "WebView2");
             var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await webViewUser.EnsureCoreWebView2Async(env);
+            double dpiScale = this.DeviceDpi / 96.0;
+            webViewUser.ZoomFactor = dpiScale >= 1.45 ? 0.80 : (dpiScale >= 1.20 ? 0.88 : 1.0);
             await webViewUser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                 $"window.appVersion = '{AppVersionHelper.DisplayVersion}'; localStorage.setItem('app_version', '{AppVersionHelper.DisplayVersion}');"
             );
@@ -206,7 +208,13 @@ namespace Frontend.Views
                 case "CHECK_APP_UPDATE":
                     _ = Task.Run(async () =>
                     {
-                        var updateResult = await UpdateService.CheckForUpdateAsync();
+                        var syncDbTask = CheckDailyBackgroundAsync(force: true);
+                        var updateTask = UpdateService.CheckForUpdateAsync();
+                        await Task.WhenAll(syncDbTask, updateTask);
+
+                        if (_isForceClosing || this.IsDisposed) return;
+
+                        var updateResult = await updateTask;
                         this.Invoke(new Action(() =>
                         {
                             if (updateResult.Success && updateResult.HasUpdate)
@@ -217,7 +225,7 @@ namespace Frontend.Views
                             else if (updateResult.Success && !updateResult.HasUpdate)
                             {
                                 MessageBox.Show(
-                                    $"Bạn đang sử dụng phiên bản mới nhất ({AppVersionHelper.DisplayVersion}).\nKhông có bản cập nhật mới nào.",
+                                    $"Bạn đang sử dụng phiên bản mới nhất ({AppVersionHelper.DisplayVersion}).\nĐã đồng bộ dữ liệu tài khoản mới nhất từ máy chủ về máy.",
                                     "Kiểm tra cập nhật",
                                     MessageBoxButtons.OK,
                                     MessageBoxIcon.Information
@@ -1139,35 +1147,8 @@ namespace Frontend.Views
                         _currentInvoicesRAM = progressData.Invoices;
                     }
 
-                    // Marshal to UI thread and run async work safely
-                    this.BeginInvoke((Action)(() =>
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                // Gửi progress qua PostWebMessageAsJson (ít overhead hơn ExecuteScript)
-                                var wrapper = new { action = "sse_progress", data = progressData };
-                                var wrapperJson = JsonConvert.SerializeObject(wrapper);
-                                this.BeginInvoke((Action)(() =>
-                                {
-                                    try { webViewUser.CoreWebView2.PostWebMessageAsJson(wrapperJson); }
-                                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine("PostWebMessage error: " + ex.Message); }
-                                }));
-
-                                // Fallback: nếu chunk cuối có hóa đơn, render ngay qua ExecuteScript
-                                if (progressData.IsDone && progressData.Invoices != null && progressData.Invoices.Count > 0)
-                                {
-                                    string jsonData = JsonConvert.SerializeObject(progressData.Invoices, Formatting.None);
-                                    await ExecuteScriptSerializedAsync($"renderInvoices({jsonData})");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine("SSE handler error: " + ex.Message);
-                            }
-                        });
-                    }));
+                    // Gửi progress qua PostWebMessageAsJson (tự động marshal về UI thread, không render trùng lặp)
+                    _ = PostWebMessageAsJson(new { action = "sse_progress", data = progressData });
                 }, cancellationToken);
             }
             catch (Exception ex)
@@ -1209,6 +1190,7 @@ namespace Frontend.Views
         private async Task RunStatusPolling()
         {
             int lastTotal = 0;
+            string lastStatus = "";
             try
             {
                 while (_isCrawling)
@@ -1216,6 +1198,10 @@ namespace Frontend.Views
                     var statusInfo = await _taxService.GetStatus();
                     if (statusInfo != null)
                     {
+                        if (!string.IsNullOrWhiteSpace(statusInfo.current_status))
+                        {
+                            lastStatus = statusInfo.current_status;
+                        }
                         await PostWebMessageAsJson(new
                         {
                             action = "CRAWL_STATUS_UPDATE",
@@ -1264,9 +1250,9 @@ namespace Frontend.Views
                             InvoiceMemoryService.Instance.GetInvoices()
                         );
 
-                        if (parseResult?.Invoices != null && parseResult.Invoices.Count > 0)
+                        if (lastTotal == 0 && parseResult != null && parseResult.TotalFilesFound > 0)
                         {
-                            InvoiceMemoryService.Instance.SetParsedXmlInvoices(parseResult.Invoices);
+                            lastTotal = parseResult.TotalFilesFound;
                         }
                     }
                     catch (Exception exParse)
@@ -1281,6 +1267,7 @@ namespace Frontend.Views
                     requestId = _currentCrawlRequestId,
                     output_dir = _currentCrawlOutputDir,
                     total_invoices = lastTotal,
+                    status_message = lastStatus,
                     total_files_found = parseResult?.TotalFilesFound ?? 0,
                     parsed_xml_count = parseResult?.TotalFilesParsed ?? 0,
                     total_files_skipped = parseResult?.TotalFilesSkipped ?? 0,
@@ -1355,6 +1342,17 @@ namespace Frontend.Views
 
                 // Gọi Google Sheet ngầm (Background)
                 var check = await _authService.CheckAsync(force: true);
+                if (!check.Success && check.Result == "NO_SESSION" && !string.IsNullOrEmpty(UserSession.Username))
+                {
+                    await _authService.RestoreSessionAsync(
+                        UserSession.Username,
+                        UserSession.FullName,
+                        UserSession.MaxTaxAccounts,
+                        UserSession.AllowAI,
+                        UserSession.EndDate
+                    );
+                    check = await _authService.CheckAsync(force: true);
+                }
 
                 if (check.Success)
                 {
@@ -1374,6 +1372,18 @@ namespace Frontend.Views
                     UserSession.AllowAI = check.AllowAI;
                     UserSession.EndDate = check.EndDate;
                     if (!string.IsNullOrEmpty(check.FullName)) UserSession.FullName = check.FullName;
+
+                    // Đồng bộ ngay giao diện Header + Cài đặt (Quota, AI, Hạn dùng)
+                    await SyncHeaderWithSession();
+                    bool allowAi = UserSession.AllowAI;
+                    bool aiEnabled = allowAi && await _taxService.GetCaptchaAiEnabledAsync();
+                    int maxQuota = UserSession.MaxTaxAccounts == int.MaxValue ? -1 : UserSession.MaxTaxAccounts;
+                    string safeEndDate = JsonConvert.ToString(UserSession.EndDate ?? "");
+                    await ExecuteScriptSerializedAsync(
+                        $"window.accountQuota = {{ maxTaxAccounts: {maxQuota}, allowAI: {(allowAi ? "true" : "false")}, endDate: {safeEndDate} }}; " +
+                        $"if(window.updateQuotaBanner) window.updateQuotaBanner(); " +
+                        $"if(window.setCaptchaAiToggle) window.setCaptchaAiToggle({(aiEnabled ? "true" : "false")}, {(allowAi ? "true" : "false")});"
+                    );
 
                     // Gửi thông tin cập nhật nếu quota thay đổi
                     _ = PostWebMessageAsJson(new { action = "ACCOUNT_UPDATED", maxQuota = check.MaxTaxAccounts, allowAI = check.AllowAI, endDate = check.EndDate });

@@ -25,6 +25,7 @@ import (
 
 type CrawlerService struct {
 	Browser            *rod.Browser
+	Launcher           *launcher.Launcher
 	Page               *rod.Page
 	OutputDir          string
 	IsRunning          bool   // Đang chạy hay không
@@ -72,14 +73,28 @@ func (c *CrawlerService) Stop() {
 	fmt.Println("🛑 Đã nhận tín hiệu dừng từ người dùng.")
 }
 
+// cleanOldRodUserData: Dọn sạch các thư mục profile Chrome tạm cũ trong %TEMP%\rod\user-data
+// để tránh tích tụ dung lượng ổ C qua nhiều lần mở app.
+func cleanOldRodUserData() {
+	rodUserDataDir := filepath.Join(os.TempDir(), "rod", "user-data")
+	entries, err := os.ReadDir(rodUserDataDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		_ = os.RemoveAll(filepath.Join(rodUserDataDir, entry.Name()))
+	}
+}
+
 // EnsureBrowser: Tự động khởi động Chrome nếu chưa có hoặc sau khi bị Shutdown
 func (s *CrawlerService) EnsureBrowser() error {
 	if s.Browser != nil {
 		return nil
 	}
+	cleanOldRodUserData()
 	l := launcher.New().
 		Leakless(false).
-		Headless(false) // Chạy ngầm Chrome không hiện cửa sổ
+		Headless(true) // Chạy ngầm Chrome không hiện cửa sổ
 
 	// Tự tìm Chrome/Chromium/Edge được cài trên máy thay vì hardcode 1 đường dẫn duy nhất
 	var browserBin string
@@ -126,6 +141,7 @@ func (s *CrawlerService) EnsureBrowser() error {
 		return fmt.Errorf("không thể kết nối Chrome: %v", err)
 	}
 	s.Browser = browser
+	s.Launcher = l
 	return nil
 }
 
@@ -2644,23 +2660,31 @@ func (s *CrawlerService) SoftLogout() error {
 	return nil
 }
 
-// Shutdown: Đóng hoàn toàn trình duyệt Chrome. Dùng khi thoát app.
+// Shutdown: Đóng hoàn toàn trình duyệt Chrome và xóa profile tạm. Dùng khi thoát app.
 func (s *CrawlerService) Shutdown() error {
 	if s.Browser == nil {
+		cleanOldRodUserData()
 		return nil
 	}
 
 	// Đóng toàn bộ trình duyệt và giải phóng tiến trình chrome.exe
 	err := s.Browser.Close()
+	s.Browser = nil
+	s.Page = nil
+
+	// Chờ ngắn để Chrome nhả file lock rồi xóa thư mục profile tạm trong %TEMP%\rod\user-data
+	time.Sleep(300 * time.Millisecond)
+	if s.Launcher != nil {
+		s.Launcher.Cleanup()
+		s.Launcher = nil
+	}
+	cleanOldRodUserData()
+
 	if err != nil {
 		return err
 	}
 
-	// Sau khi Close, biến Browser sẽ không dùng được nữa cho đến khi Init lại
-	s.Browser = nil
-	s.Page = nil
-
-	fmt.Println("Hệ thống: Đã đóng trình duyệt Chrome.")
+	fmt.Println("Hệ thống: Đã đóng trình duyệt Chrome và dọn sạch profile tạm.")
 	return nil
 }
 

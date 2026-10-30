@@ -22,6 +22,13 @@ namespace Frontend.Services
             new Lazy<XmlInvoiceParserService>(() => new XmlInvoiceParserService());
         public static XmlInvoiceParserService Instance => _instance.Value;
 
+        // Precompiled Regex để tăng tốc độ bóc tách hàng loạt file XML và giảm cấp phát bộ nhớ (GC)
+        private static readonly Regex _wsRegex = new Regex(@"\s+", RegexOptions.Compiled);
+        private static readonly Regex _mstCleanRegex = new Regex(@"[\s\-]", RegexOptions.Compiled);
+        private static readonly Regex _invalidXmlCharsRegex = new Regex(@"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", RegexOptions.Compiled);
+        private static readonly Regex _decimalCleanRegex = new Regex(@"[^\d,\.\-]", RegexOptions.Compiled);
+        private static readonly Regex _taxRateRegex = new Regex(@"^(\d+(\.\d+)?)%", RegexOptions.Compiled);
+
         /// <summary>
         /// Bộ nhớ lưu trữ kết quả bóc tách gần nhất để phục vụ ngay cho Module Xuất Excel
         /// </summary>
@@ -312,7 +319,7 @@ namespace Frontend.Services
 
                 // Số hóa đơn: Lấy giá trị số và loại bỏ toàn bộ khoảng trắng thừa
                 string rawShdon = GetElementValue(ttChung, "SHDon");
-                invoice.SHDon = Regex.Replace(rawShdon ?? "", @"\s+", "").Trim();
+                invoice.SHDon = _wsRegex.Replace(rawShdon ?? "", "").Trim();
 
                 invoice.NLapRaw = GetElementValue(ttChung, "NLap");
                 invoice.NLap = ParseDateTime(invoice.NLapRaw);
@@ -646,7 +653,7 @@ namespace Frontend.Services
         public static string CleanMst(string? mst)
         {
             if (string.IsNullOrWhiteSpace(mst)) return string.Empty;
-            return Regex.Replace(mst, @"[\s\-]", "").Trim();
+            return _mstCleanRegex.Replace(mst, "").Trim();
         }
 
         /// <summary>
@@ -656,7 +663,7 @@ namespace Frontend.Services
         public static string CleanInvalidXmlChars(string? text)
         {
             if (string.IsNullOrEmpty(text)) return string.Empty;
-            return Regex.Replace(text, @"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "");
+            return _invalidXmlCharsRegex.Replace(text, "");
         }
 
         /// <summary>
@@ -714,7 +721,7 @@ namespace Frontend.Services
             if (string.IsNullOrWhiteSpace(str)) return null;
 
             str = str.Trim();
-            str = Regex.Replace(str, @"[^\d,\.\-]", "");
+            str = _decimalCleanRegex.Replace(str, "");
 
             if (string.IsNullOrWhiteSpace(str)) return null;
 
@@ -751,7 +758,7 @@ namespace Frontend.Services
             if (string.IsNullOrWhiteSpace(tSuat)) return null;
 
             string clean = tSuat.Trim();
-            var match = Regex.Match(clean, @"^(\d+(\.\d+)?)%");
+            var match = _taxRateRegex.Match(clean);
             if (match.Success && decimal.TryParse(match.Groups[1].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal rate))
             {
                 return rate;

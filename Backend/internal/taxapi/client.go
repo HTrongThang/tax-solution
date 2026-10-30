@@ -37,8 +37,9 @@ type Session interface {
 
 // Client gọi API cổng thuế bằng JWT lấy từ Session.
 type Client struct {
-	http *http.Client
-	sess Session
+	http      *http.Client
+	sess      Session
+	cachedJWT string
 	// Solve đọc chữ trong ảnh captcha PNG (mặc định dùng Gemini, xem captcha.go).
 	Solve func(ctx context.Context, png []byte) (string, error)
 	// Logf in log tiến trình (nil = im lặng).
@@ -106,8 +107,11 @@ func (c *Client) get(ctx context.Context, endpoint string, q url.Values, withCap
 			attempt--
 			continue
 		}
-		// 4xx (thường do captcha giải sai): thử lại nhanh với captcha mới.
+		// 4xx: nếu có dùng captcha thì thử lại với captcha mới; nếu không dùng captcha thì trả lỗi ngay (để chuyển nhánh /query <-> /sco-query).
 		if status >= 400 && status < 500 {
+			if !withCaptcha {
+				return nil, fmt.Errorf("bị từ chối: %w", err)
+			}
 			clientErrs++
 			if clientErrs >= maxClientErrTries {
 				return nil, fmt.Errorf("bị từ chối: %w", err)
@@ -131,9 +135,14 @@ func (c *Client) get(ctx context.Context, endpoint string, q url.Values, withCap
 
 // once gọi đúng một lần. Trả về (body, status, err); body luôn có khi cổng có trả về.
 func (c *Client) once(ctx context.Context, endpoint string, q url.Values, withCaptcha bool) ([]byte, int, error) {
-	token, err := c.sess.GetJWT()
-	if err != nil {
-		return nil, 0, fmt.Errorf("không lấy được JWT: %w", err)
+	token := c.cachedJWT
+	if token == "" {
+		var err error
+		token, err = c.sess.GetJWT()
+		if err != nil {
+			return nil, 0, fmt.Errorf("không lấy được JWT: %w", err)
+		}
+		c.cachedJWT = token
 	}
 	// Sao chép query để không làm đổi tham số của người gọi giữa các lần thử.
 	qq := url.Values{}
@@ -172,6 +181,9 @@ func (c *Client) once(ctx context.Context, endpoint string, q url.Values, withCa
 		return nil, res.StatusCode, fmt.Errorf("đọc phản hồi: %w", err)
 	}
 	if res.StatusCode != http.StatusOK {
+		if res.StatusCode == http.StatusUnauthorized {
+			c.cachedJWT = ""
+		}
 		snippet := strings.Join(strings.Fields(string(body)), " ")
 		if len(snippet) > 300 {
 			snippet = snippet[:300]

@@ -288,15 +288,11 @@ window.handleSseProgress = function (data) {
 
     if (isDone) {
         if (Array.isArray(invoices) && invoices.length) {
-            // Nạp toàn bộ dữ liệu vào RAM
+            // Nạp toàn bộ dữ liệu vào RAM và phân trang (trang 1, 20 dòng/trang)
             if (typeof window.setInvoiceRAM === 'function') {
                 window.setInvoiceRAM(invoices);
             }
-            // small delay to allow status UI to update first
             setTimeout(() => {
-                try { renderInvoices(invoices); }
-                catch (ex) { console.error('renderInvoices error', ex); }
-                // handle pagination (client-side if invoices present)
                 handlePagination({ invoices, totalItems: total, currentPage: 1, pageSize: 20 });
                 if (typeof window.updateExportXmlButtonState === 'function') {
                     window.updateExportXmlButtonState(true);
@@ -311,16 +307,6 @@ window.handleSseProgress = function (data) {
                 window.updateExportXmlButtonState(false);
             }
             if (window.finalizeSearchUI) window.finalizeSearchUI();
-        }
-    } else {
-        // intermediate update: optionally render partial invoices
-        if (Array.isArray(invoices) && invoices.length) {
-            try { renderInvoices(invoices); }
-            catch (ex) { console.error('renderInvoices error', ex); }
-            handlePagination({ invoices, totalItems: total, currentPage: 1, pageSize: 20 });
-            if (typeof window.updateExportXmlButtonState === 'function') {
-                window.updateExportXmlButtonState(true);
-            }
         }
     }
 };
@@ -372,9 +358,11 @@ window.finalizeSearchUI = function () {
 // Otherwise render empty pagination using totalItems and request pages from host on click.
 window.handlePagination = function ({ invoices = null, totalItems = 0, currentPage = 1, pageSize = 20 }) {
     if (Array.isArray(invoices) && invoices.length) {
-        // cache and show first page (or requested page)
+        // paginateClient đã tự gọi showPage(1), chỉ gọi lại showPage nếu currentPage != 1
         paginateClient(invoices, pageSize);
-        showPage(currentPage);
+        if (currentPage && currentPage !== 1) {
+            showPage(currentPage);
+        }
     } else {
         // no client data: just render pagination UI and rely on host for page data
         renderPagination(totalItems, currentPage, pageSize);
@@ -1494,6 +1482,7 @@ window.handleSearchClick = function () {
 
     // 3. Gửi sang C# (WinForms) để báo cho Backend Go bắt đầu Crawl
     if (window.chrome && window.chrome.webview) {
+        window._lastSearchedInvoiceType = params.invoiceType || 'ban_ra';
         window.chrome.webview.postMessage({
             action: "SEARCH_INVOICE",
             data: {
@@ -2044,7 +2033,7 @@ async function handleExportXml(btn) {
                         action: 'START_CRAWL',
                         output_dir: out,
                         mst: window._loggedInMst || window._selectedCompanyMst || '',
-                        invoice_type: window._currentInvoiceType || 'ban_ra',
+                        invoice_type: window._lastSearchedInvoiceType || window._currentInvoiceType || 'ban_ra',
                         requestId
                     });
                     return;
@@ -2114,12 +2103,22 @@ async function handleExportXml(btn) {
     // 6. Chờ kết quả
     try {
         const result = await promise;
-        const total = result?.total_invoices || result?.TotalInvoices || '';
-        const msg = total ? `Đã tải xong ${total} hóa đơn!` : 'Hoàn tất xuất XML!';
-        showProgress(msg, 'File XML đã được lưu vào thư mục bạn chọn.', true);
-        // Tự đóng status box sau 5 giây
-        setTimeout(hideProgress, 5000);
-        window.showAlert?.('Thành công', msg, 'success');
+        const total = result?.total_invoices || result?.TotalInvoices || result?.parsed_xml_count || result?.total_files_found || 0;
+        const statusMsg = result?.status_message || '';
+        if (!total || Number(total) <= 0) {
+            const errDetail = (statusMsg && (statusMsg.toLowerCase().includes('lỗi') || statusMsg.toLowerCase().includes('không')))
+                ? statusMsg
+                : 'Không tải được file XML nào từ cổng thuế. Vui lòng kiểm tra phiên đăng nhập hoặc thử lại.';
+            showProgress('Chưa tải được file XML (0 HĐ)', errDetail, false, true);
+            setTimeout(hideProgress, 6000);
+            window.showAlert?.('Cảnh báo xuất XML', errDetail, 'warning');
+        } else {
+            const msg = `Đã tải xong ${total} hóa đơn!`;
+            showProgress(msg, 'File XML đã được lưu vào thư mục bạn chọn.', true);
+            // Tự đóng status box sau 5 giây
+            setTimeout(hideProgress, 5000);
+            window.showAlert?.('Thành công', msg, 'success');
+        }
     } catch (err) {
         console.error('Export XML failed:', err);
         const errMsg = err.message || 'Không xác định';
@@ -2332,7 +2331,7 @@ function handleDownloadDetail() {
         action: 'START_CRAWL',
         output_dir: 'DEFAULT_DOWNLOADS',
         mst: window._loggedInMst || window._selectedCompanyMst || '',
-        invoice_type: window._currentInvoiceType || 'ban_ra',
+        invoice_type: window._lastSearchedInvoiceType || window._currentInvoiceType || 'ban_ra',
         requestId
     });
 }
@@ -2377,12 +2376,19 @@ function handleStopDownload() {
 
 // Hoàn tất tải chi tiết
 function _onDownloadFinished(payload) {
+    const parsedCount = payload?.parsed_xml_count || (Array.isArray(payload?.parsed_invoices) ? payload.parsed_invoices.length : 0);
+    const totalFound = payload?.total_files_found || 0;
+    const totalDownloaded = payload?.total_invoices || 0;
+    if (parsedCount === 0 && totalFound === 0 && totalDownloaded === 0) {
+        const errMsg = payload?.status_message || 'Không tải được dữ liệu chi tiết hóa đơn nào (0 HĐ). Vui lòng thử lại.';
+        _onDownloadError({ message: errMsg });
+        return;
+    }
+
     window._isDownloadingDetail = false;
     _stopDownloadTimer();
     _restoreDownloadUI();
 
-    const parsedCount = payload?.parsed_xml_count || (Array.isArray(payload?.parsed_invoices) ? payload.parsed_invoices.length : 0);
-    const totalFound = payload?.total_files_found || 0;
     const totalSkipped = payload?.total_files_skipped || 0;
     const totalFailed = payload?.total_files_failed || 0;
 

@@ -1,7 +1,7 @@
 {
-  "latest_version": "1.0.8",
-  "min_required_version": "1.0.8",
-  "download_url": "https://github.com/HTrongThang/tax-distribution/releases/download/v1.0.8/TaxSolution_Setup_v1.0.8.exe",
-  "release_notes": "1. Tự động lưu êm ái không làm phiền:\n   - Tự động xuất Báo cáo tổng hợp, Bảng kê chi tiết và tải hóa đơn XML/PDF thẳng vào thư mục Downloads của máy tính mà không cần hỏi hộp thoại.\n   - Tự động mở file Excel ngay khi xuất xong.\n\n2. Tương thích đa thiết bị & đa máy tính:\n   - Tự động phát hiện và tương thích mọi phiên bản Google Chrome và Microsoft Edge.\n   - Trình duyệt chạy ngầm êm ái 100% không hiện cửa sổ.\n\n3. Nâng cấp phân trang hóa đơn:\n   - Tự động quay về trang 1 trước khi tải chi tiết, đảm bảo thu thập đủ 100% hóa đơn.",
+  "latest_version": "1.1.0",
+  "min_required_version": "1.1.0",
+  "download_url": "https://github.com/HTrongThang/tax-distribution/releases/download/v1.1.0/TaxSolution_Setup_v1.1.0.exe",
+  "release_notes": "1. Tối ưu tốc độ tra cứu & tải XML qua API Tổng cục Thuế:\n   - Gọi trực tiếp API cổng thuế cho cả tab Hóa đơn điện tử và Từ máy tính tiền, hỗ trợ đầy đủ mọi Kết quả kiểm tra.\n   - Tăng tốc độ phân trang (50 HĐ/trang) và khắc phục triệt để lỗi tải thiếu hoặc báo 0 HĐ khi xuất XML.\n\n2. Đồng bộ dữ liệu tài khoản & Tối ưu giao diện:\n   - Nút Kiểm tra cập nhật nay đồng thời tải lại dữ liệu tài khoản mới nhất từ máy chủ (Google Sheet) về DB máy.\n   - Tự động cân chỉnh tỷ lệ hiển thị trên màn hình laptop 125% - 150% DPI, trình duyệt chạy ngầm 100%.",
   "is_force_update": true
 }

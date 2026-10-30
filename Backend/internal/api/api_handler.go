@@ -248,11 +248,11 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 
 	// Chế độ gọi thẳng API (TAX_MODE=api): không điều khiển giao diện Chrome
 	if apiSearchSupported(invoiceType, category, checkResult) {
-		h.apiSearch(c, fromDate, toDate, invoiceType)
+		h.apiSearch(c, fromDate, toDate, invoiceType, category, checkResult)
 		return
 	}
 	// Luồng Chrome: xóa danh sách API cũ để nút tải không dùng nhầm dữ liệu của lần tìm trước
-	h.api.setItems(nil, "")
+	h.api.setItems(nil, "", "")
 
 	// Headers SSE
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
@@ -266,7 +266,14 @@ func (h *Handler) GetInvoices(c *gin.Context) {
 	go func() {
 		defer close(streamChan)
 		// Gọi crawler (truyền ctx để hỗ trợ ngắt kết nối)
-		_, _ = h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, invoiceType, category, checkResult, streamChan)
+		invs, _ := h.Crawler.SearchAndGetInvoices(ctx, fromDate, toDate, invoiceType, category, checkResult, streamChan)
+		if len(invs) > 0 {
+			src := taxapi.HDDT
+			if category == "may_tinh_tien" {
+				src = taxapi.MTT
+			}
+			h.api.setItems(taxapi.ItemsFromInvoices(invs, src), invoiceType, src)
+		}
 	}()
 
 	// Đẩy dữ liệu về Client
@@ -345,7 +352,7 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 	h.Crawler.OutputDir = finalDir
 
 	// Chế độ gọi thẳng API: nếu lần tìm gần nhất đã chạy bằng API thì tải XML trực tiếp
-	if apiItems := h.apiDownloadReady(req.InvoiceType); len(apiItems) > 0 {
+	if apiItems, apiSrc := h.apiDownloadReady(req.InvoiceType); len(apiItems) > 0 {
 		// Đang có tiến trình tải chạy → không mở thêm luồng thứ hai (lẫn số đếm, dễ bị cổng chặn 429)
 		if h.Crawler.IsRunning {
 			_ = os.Remove(finalDir)
@@ -366,7 +373,7 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 			h.Crawler.OutputDir = finalDir
 			fmt.Printf("♻️ Tải bù vào thư mục đang dở: %s\n", finalDir)
 		}
-		h.apiDownload(apiItems, finalDir)
+		h.apiDownload(apiItems, apiSrc, finalDir)
 		c.JSON(http.StatusOK, models.CrawlResponse{
 			Status:    "success",
 			Message:   "Tiến trình tải dữ liệu (API) đã bắt đầu chạy ngầm.",
@@ -377,6 +384,13 @@ func (h *Handler) StartCrawl(c *gin.Context) {
 	}
 
 	// 5. KÍCH HOẠT CHẠY NGẦM (GOROUTINE)
+	// Đặt trạng thái IsRunning = true ĐỒNG BỘ trước khi trả HTTP 200 để C# poll /api/tax/status
+	// không bao giờ đọc nhầm is_running=false ở nhịp đầu tiên.
+	h.Crawler.IsRunning = true
+	h.Crawler.StopRequested = false
+	h.Crawler.TotalInvoices = 0
+	h.Crawler.CurrentStatus = "Bắt đầu khởi động tiến trình tải..."
+
 	// Giải phóng cho Postman/ .NET ngay lập tức
 	go func() {
 		fmt.Printf("🤖 Hệ thống dụng bắt đầu làm việc ngầm. Kết quả sẽ lưu tại: %s\n", finalDir)

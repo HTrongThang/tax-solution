@@ -123,14 +123,14 @@ function lamMoiForm() {
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const dd = String(now.getDate()).padStart(2, '0');
-    document.getElementById('new_start').value = ${yyyy}--;
+    document.getElementById('new_start').value = `${yyyy}-${mm}-${dd}`;
 
     const nextYear = new Date();
     nextYear.setFullYear(nextYear.getFullYear() + 1);
     const y2 = nextYear.getFullYear();
     const m2 = String(nextYear.getMonth() + 1).padStart(2, '0');
     const d2 = String(nextYear.getDate()).padStart(2, '0');
-    document.getElementById('new_end').value = ${y2}--;
+    document.getElementById('new_end').value = `${y2}-${m2}-${d2}`;
 
     // Tự động quay lại trang đăng nhập sau 1.5 giây để người dùng kịp đọc thông báo
     setTimeout(function () {
@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const dd = String(now.getDate()).padStart(2, '0');
     if (startInput && !startInput.value) {
-        startInput.value = ${yyyy}--;
+        startInput.value = `${yyyy}-${mm}-${dd}`;
     }
     if (endInput && !endInput.value) {
         const nextYear = new Date();
@@ -163,7 +163,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         const y2 = nextYear.getFullYear();
         const m2 = String(nextYear.getMonth() + 1).padStart(2, '0');
         const d2 = String(nextYear.getDate()).padStart(2, '0');
-        endInput.value = ${y2}--;
+        endInput.value = `${y2}-${m2}-${d2}`;
     }
 
     const hwInput = document.getElementById('new_hwid');

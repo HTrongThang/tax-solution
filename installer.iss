@@ -1,6 +1,6 @@
 ; Script generated for Inno Setup 6
 #define MyAppName "TaxSolution"
-#define MyAppVersion "1.0.8"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "ACC Online"
 #define MyAppURL "https://github.com/HTrongThang/tax-solution"
 #define MyAppExeName "Frontend.exe"
